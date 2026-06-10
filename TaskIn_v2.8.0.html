@@ -57,7 +57,21 @@
   --shadow-lg: 0 24px 64px rgba(0,0,0,0.12);
   --shadow-float: 0 8px 32px rgba(79, 70, 229, 0.15);
 }
-body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;letter-spacing:-0.02em;line-height:1.5;}
+[data-theme="dark"]{
+  --bg:#0F1117; --surface:#1A1D27; --surface2:#22263A; --surface-hover:#2A2F45;
+  --border:#2E3348; --border2:#3A4060;
+  --t1:#F1F3F5; --t2:#ADB5BD; --t3:#5C6580;
+  --acc:#818CF8; --acc-bg:#1E1F3A; --acc-hover:#6366F1;
+  --red:#FF6B6B; --red-bg:#2D1A1A;
+  --amb:#FFD43B; --amb-bg:#2D2700;
+  --grn:#51CF66; --grn-bg:#0F2B14;
+  --pur:#A78BFA; --pur-bg:#1E1A2E;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-md: 0 12px 32px rgba(0,0,0,0.4);
+  --shadow-lg: 0 24px 64px rgba(0,0,0,0.6);
+  --shadow-float: 0 8px 32px rgba(129,140,248,0.2);
+}
+body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;letter-spacing:-0.02em;line-height:1.5;transition:background 0.3s,color 0.3s;}
 
 /* ── 레이아웃 ── */
 .app{display:flex;min-height:100vh;}
@@ -346,6 +360,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
         </button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="dark-mode-btn" class="btn btn-ghost" style="width:100%;border-radius:12px;font-size:13px;padding:10px;" onclick="toggleDarkMode()">🌙 다크 모드</button>
         <button class="btn btn-ghost" style="width:100%;border-radius:12px;font-size:13px;padding:10px;" onclick="exportData()">💾 데이터 백업 (.json)</button>
         <button class="btn btn-ghost" style="width:100%;border-radius:12px;font-size:13px;padding:10px;" onclick="exportICS()">📅 구글 캘린더 내보내기 (.ics)</button>
         <button class="btn btn-ghost" style="width:100%;border-radius:12px;font-size:13px;padding:10px;" onclick="document.getElementById('import-input').click()">📂 백업 불러오기</button>
@@ -3134,8 +3149,24 @@ function startApp() {
   localStorage.setItem('taskin_user',name); document.getElementById('onboarding').style.display='none'; document.getElementById('app').style.display='flex'; location.reload();
 }
 
+// ════════ 다크 모드 ════════
+function toggleDarkMode() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('taskin_theme', next);
+  document.getElementById('dark-mode-btn').textContent = next === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드';
+}
+function applyTheme() {
+  const theme = localStorage.getItem('taskin_theme') || 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('dark-mode-btn');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드';
+}
+
 // ════════ 초기화 ════════
 (function init() {
+  applyTheme();
   loadAll();
   // 버전 표시 자동 주입
   const sv = document.getElementById('sidebar-version'); if (sv) sv.textContent = `Smart Workspace v${APP_VERSION}`;
