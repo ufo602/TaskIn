@@ -1,5 +1,7 @@
 # TaskIn
 
+![version](https://img.shields.io/badge/version-2.9.0-blue)
+
 스마트 워크스페이스 — Claude Code로 개발한 업무 관리 서비스
 
 ## 주요 기능
