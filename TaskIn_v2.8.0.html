@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.9.0 (2026-06-16)
+    - 다크 모드 필터칩(전체보기/업무/개인) 활성 상태 색상 수정 (흰 글씨 가시성 개선)
+    - 다크 모드 Undo·ICS 토스트 배경색 수정
+    - 사이드바 로고 하단 구분선 추가
+    - 사이드바 카테고리에 전체보기 항목 추가
   v2.8.0 (2026-06-09)
     - 백업(.json)에 버전 메타(appVersion/dataSchema/exportedAt/user) 기록
     - 백업 불러오기 시 버전 정보 안내 + kanbanOrder 복원 + 사용자명 복원 제안
@@ -37,7 +42,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.8.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.9.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -76,7 +81,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 /* ── 레이아웃 ── */
 .app{display:flex;min-height:100vh;}
 .sidebar{width:250px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:32px 0 24px 0;flex-shrink:0;z-index:10;}
-.sidebar-logo{padding:0 24px 24px;margin-bottom:8px;}
+.sidebar-logo{padding:0 24px 24px;margin-bottom:8px;border-bottom:1px solid var(--border);}
 .logo-text{font-size:24px;font-weight:800;color:var(--t1);letter-spacing:-0.04em;}
 .logo-text span{color:var(--acc);}
 .logo-sub{font-size:12px;font-weight:500;color:var(--t3);margin-top:4px;}
@@ -161,7 +166,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:24px;flex-wrap:wrap;}
 .filter-chip{font-size:13px;font-weight:700;padding:10px 20px;border-radius:24px;border:1px solid var(--border);background:var(--surface);color:var(--t2);cursor:pointer;transition:all .2s ease;box-shadow:var(--shadow-sm);}
 .filter-chip:hover{background:var(--surface2);transform:translateY(-1px);}
-.filter-chip.on{background:var(--t1);border-color:var(--t1);color:#fff;}
+.filter-chip.on{background:var(--acc);border-color:var(--acc);color:#fff;}
 
 /* ── 태스크 추가 폼 ── */
 .add-task-card{background:var(--surface);border:1px solid var(--border2);border-radius:20px;box-shadow:var(--shadow-md);margin-bottom:32px;display:flex;align-items:center;padding:8px 8px 8px 20px;transition:all 0.3s ease;}
@@ -345,6 +350,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
       <div class="nav-section">카테고리</div>
       <div class="nav-item" onclick="filterAndGo('work')">💼 업무</div>
       <div class="nav-item" onclick="filterAndGo('personal')">🏠 개인</div>
+      <div class="nav-item" onclick="filterAndGo('all')">📋 전체보기</div>
       <div class="nav-section">데이터 관리</div>
       <div class="nav-item" onclick="showPage('trash',this)" id="nav-trash">
         🗑️ 휴지통
@@ -1017,7 +1023,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.8.0";   // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.9.0";   // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 전역 상태 ════════
@@ -2771,7 +2777,7 @@ function showUndoToast(title) {
   let toast = document.getElementById('undo-toast');
   if (!toast) {
     toast = document.createElement('div'); toast.id='undo-toast';
-    toast.style.cssText='position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:var(--t1);color:#fff;border-radius:16px;padding:16px 24px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:20px;z-index:2000;box-shadow:var(--shadow-lg);white-space:nowrap;overflow:hidden;min-width:360px;opacity:0;transition:opacity 0.3s ease;';
+    toast.style.cssText='position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:#1e2130;color:#fff;border-radius:16px;padding:16px 24px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:20px;z-index:2000;box-shadow:var(--shadow-lg);white-space:nowrap;overflow:hidden;min-width:360px;opacity:0;transition:opacity 0.3s ease;';
     document.body.appendChild(toast);
   }
   const short = title.length > 15 ? title.slice(0,15)+'…' : title;
@@ -3083,7 +3089,7 @@ function exportICS() {
   // 안내 토스트
   setTimeout(() => {
     let toast = document.createElement('div');
-    toast.style.cssText = 'position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:var(--t1);color:#fff;border-radius:16px;padding:16px 24px;font-size:14px;font-weight:600;z-index:2000;box-shadow:var(--shadow-lg);opacity:0;transition:opacity 0.3s;max-width:480px;text-align:center;line-height:1.6;';
+    toast.style.cssText = 'position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:#1e2130;color:#fff;border-radius:16px;padding:16px 24px;font-size:14px;font-weight:600;z-index:2000;box-shadow:var(--shadow-lg);opacity:0;transition:opacity 0.3s;max-width:480px;text-align:center;line-height:1.6;';
     toast.innerHTML = `📅 <b>${exportable.length}개 태스크</b>를 .ics 파일로 저장했습니다!<br><span style="font-size:12px;color:rgba(255,255,255,.7);">구글 캘린더 → 설정 → 가져오기에서 파일을 업로드하세요.</span>`;
     document.body.appendChild(toast);
     setTimeout(() => toast.style.opacity = '1', 10);
