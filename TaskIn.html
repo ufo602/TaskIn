@@ -5,6 +5,9 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.11.1 (2026-06-23)
+    - 패치노트 첫 표시 버그 수정 — 기존 사용자에게 팝업이 처음 한 번 안 뜨던 문제
+    - 신규 사용자는 가입 시점에 seen_version을 기록해 팝업 제외
   v2.11.0 (2026-06-23)
     - 패치노트(새로워진 점) 기능 추가 — 버전 업 시 자동 팝업 안내
     - 사이드바 버전 클릭 시 전체 패치노트 열람 (RELEASE_NOTES 단일 출처)
@@ -52,7 +55,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.11.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.11.1 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -1113,11 +1116,15 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.11.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.11.1";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.11.1", date: "2026-06-23", title: "패치노트 첫 표시 버그 수정", items: [
+    "기존 사용자에게 '새로워진 점' 팝업이 처음 한 번 뜨지 않던 문제 수정",
+    "신규 사용자에게는 가입 시점부터 팝업이 뜨지 않도록 정리",
+  ]},
   { version: "2.11.0", date: "2026-06-23", title: "패치노트(새로워진 점) 기능 추가", items: [
     "버전이 올라가면 '새로워진 점' 팝업으로 변경사항을 안내",
     "사이드바 버전을 클릭하면 언제든 전체 패치노트 열람 가능",
@@ -1371,9 +1378,11 @@ function openWhatsNew() {
   m.style.display = 'flex'; m.classList.add('open');
 }
 // 버전이 올라갔으면 1회 자동 안내, 그리고 마지막 본 버전 기록
+// 주의: seen이 없으면(=패치노트 기능 도입 이전부터 쓰던 사용자) 1회 안내한다.
+//      진짜 신규 사용자는 startApp()의 온보딩에서 seen을 미리 기록하므로 여기서 팝업되지 않는다.
 function checkVersionUpdate() {
   const seen = localStorage.getItem('taskin_seen_version');
-  if (seen && seen !== APP_VERSION) openWhatsNew();
+  if (seen !== APP_VERSION) openWhatsNew();
   localStorage.setItem('taskin_seen_version', APP_VERSION);
 }
 
@@ -3363,7 +3372,9 @@ function changeUserName() {
 function startApp() {
   const name=document.getElementById('ob-name').value.trim();
   if(!name) return alert('이름이나 닉네임을 꼭 입력해주세요!');
-  localStorage.setItem('taskin_user',name); document.getElementById('onboarding').style.display='none'; document.getElementById('app').style.display='flex'; location.reload();
+  localStorage.setItem('taskin_user',name);
+  localStorage.setItem('taskin_seen_version', APP_VERSION); // 신규 사용자에겐 패치노트 팝업 띄우지 않음
+  document.getElementById('onboarding').style.display='none'; document.getElementById('app').style.display='flex'; location.reload();
 }
 
 // ════════ 다크 모드 ════════
