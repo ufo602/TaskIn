@@ -5,6 +5,9 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.11.0 (2026-06-23)
+    - 패치노트(새로워진 점) 기능 추가 — 버전 업 시 자동 팝업 안내
+    - 사이드바 버전 클릭 시 전체 패치노트 열람 (RELEASE_NOTES 단일 출처)
   v2.10.0 (2026-06-17)
     - 모바일 반응형 레이아웃 도입 (≤768px / ≤420px 미디어쿼리)
     - 사이드바 → 슬라이드 드로어 (햄버거 ☰ 버튼 + 배경 탭으로 닫기)
@@ -49,7 +52,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.10.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.11.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -314,6 +317,20 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 @keyframes fadeIn{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
 @keyframes modalIn{from{opacity:0;transform:scale(0.92) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* ════════ 패치노트 (v2.11.0) ════════ */
+.relnote{padding:18px 20px;border-radius:16px;background:var(--surface2);margin-bottom:14px;border:1px solid var(--border);}
+.relnote.latest{background:var(--acc-bg);border-color:var(--acc);}
+.relnote-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+.relnote-ver{font-size:16px;font-weight:800;color:var(--t1);}
+.relnote-date{font-size:12px;font-weight:600;color:var(--t3);}
+.relnote-new{font-size:11px;font-weight:800;color:#fff;background:var(--acc);border-radius:8px;padding:2px 8px;letter-spacing:0.02em;}
+.relnote-title{font-size:13px;font-weight:700;color:var(--t2);margin-bottom:10px;}
+.relnote-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;}
+.relnote-list li{font-size:14px;font-weight:500;color:var(--t1);padding-left:20px;position:relative;line-height:1.5;}
+.relnote-list li::before{content:"✓";position:absolute;left:0;color:var(--acc);font-weight:800;}
+.logo-sub.clickable{cursor:pointer;transition:color .2s;}
+.logo-sub.clickable:hover{color:var(--acc);}
+
 /* ════════ 저장공간 게이지 (v2.10.0) ════════ */
 .storage-meter{padding:12px 14px;background:var(--surface2);border-radius:14px;margin-bottom:12px;cursor:pointer;}
 .storage-meter-head{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;}
@@ -387,7 +404,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
   <div class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <div class="logo-text">Task<span>In</span></div>
-      <div class="logo-sub" id="sidebar-version">Smart Workspace</div>
+      <div class="logo-sub clickable" id="sidebar-version" onclick="openWhatsNew()" title="패치노트 보기">Smart Workspace</div>
     </div>
     <div style="padding:0 16px;">
       <div class="nav-item active" onclick="showPage('dashboard',this)">📊 대시보드 (성과)</div>
@@ -919,6 +936,23 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
   </div>
 </div>
 
+<!-- 패치노트(새로워진 점) 모달 -->
+<div class="modal-overlay" id="whatsnew-modal-overlay" style="display:none;" onclick="closeAllModals(event)">
+  <div class="modal-box" style="width:520px;">
+    <div class="modal-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="font-size:22px;font-weight:800;color:var(--t1);margin:0;display:flex;align-items:center;gap:8px;">
+          <span>🎉</span> 새로워진 점
+        </h3>
+        <button class="btn btn-ghost" style="padding:10px;border-radius:50%;border:none;background:var(--surface2);" onclick="closeAllModals()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+    <div class="modal-body" id="whatsnew-body"></div>
+  </div>
+</div>
+
 <!-- 7. AI 실적 보고서 모달 -->
 <div class="modal-overlay" id="report-modal-overlay" style="display:none;" onclick="closeAllModals(event)">
   <div class="modal-box" style="width:780px;">
@@ -1079,8 +1113,34 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.10.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.11.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
+
+// ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
+const RELEASE_NOTES = [
+  { version: "2.11.0", date: "2026-06-23", title: "패치노트(새로워진 점) 기능 추가", items: [
+    "버전이 올라가면 '새로워진 점' 팝업으로 변경사항을 안내",
+    "사이드바 버전을 클릭하면 언제든 전체 패치노트 열람 가능",
+  ]},
+  { version: "2.10.0", date: "2026-06-17", title: "모바일 최적화 & 저장공간 관리", items: [
+    "모바일 반응형 레이아웃 (사이드바 슬라이드 드로어 + 햄버거 메뉴)",
+    "지표·칸반·그리드 모바일 대응 (4칸→2칸, 칸반 가로 스크롤)",
+    "사이드바에 저장공간 사용량 게이지 추가 (클릭 시 백업)",
+    "저장 실패 시 안내 토스트로 데이터 유실 방지 안전망 추가",
+  ]},
+  { version: "2.9.0", date: "2026-06-16", title: "다크 모드 버그 수정 & UI 개선", items: [
+    "다크 모드 필터칩·토스트 색상 가시성 개선",
+    "사이드바 로고 구분선 및 전체보기 항목 추가",
+  ]},
+  { version: "2.8.0", date: "2026-06-09", title: "백업 강화 & 사용자 이름", items: [
+    "백업(.json)에 버전 메타 기록 + 불러오기 시 버전 안내",
+    "사용자 이름 변경 기능",
+  ]},
+  { version: "2.7.0", date: "2026-06-09", title: "완료 시점 기록 & 버전 체계", items: [
+    "완료 시점(completedAt) 기록으로 실적 집계 정확화",
+    "버전 관리 체계 정립 (APP_VERSION + CHANGELOG + 화면 표시)",
+  ]},
+];
 
 // ════════ 전역 상태 ════════
 const TODAY = new Date();
@@ -1288,6 +1348,35 @@ function closeSidebar() {
   if (sb) sb.classList.remove('open');
   if (bd) bd.classList.remove('open');
 }
+
+// ════════ 패치노트(새로워진 점) ════════
+function renderReleaseNotes() {
+  const body = document.getElementById('whatsnew-body');
+  if (!body) return;
+  body.innerHTML = RELEASE_NOTES.map((r, idx) => `
+    <div class="relnote${idx === 0 ? ' latest' : ''}">
+      <div class="relnote-head">
+        <span class="relnote-ver">v${r.version}</span>
+        ${idx === 0 ? '<span class="relnote-new">NEW</span>' : ''}
+        <span class="relnote-date">${r.date}</span>
+      </div>
+      ${r.title ? `<div class="relnote-title">${r.title}</div>` : ''}
+      <ul class="relnote-list">${r.items.map(it => `<li>${it}</li>`).join('')}</ul>
+    </div>`).join('');
+}
+function openWhatsNew() {
+  renderReleaseNotes();
+  closeSidebar();
+  const m = document.getElementById('whatsnew-modal-overlay');
+  m.style.display = 'flex'; m.classList.add('open');
+}
+// 버전이 올라갔으면 1회 자동 안내, 그리고 마지막 본 버전 기록
+function checkVersionUpdate() {
+  const seen = localStorage.getItem('taskin_seen_version');
+  if (seen && seen !== APP_VERSION) openWhatsNew();
+  localStorage.setItem('taskin_seen_version', APP_VERSION);
+}
+
 function filterAndGo(cat) {
   activeFilter = cat;
   showPage('list', document.querySelectorAll('.nav-item')[1]);
@@ -3305,6 +3394,7 @@ function applyTheme() {
     document.getElementById('onboarding').style.display='none';
     document.getElementById('app').style.display='flex';
     renderDashboard(); renderCurrentView(); renderWikiList(); updateTrashBadge(); renderTrash(); renderNotif(); updateStorageMeter();
+    checkVersionUpdate();
   }
 })();
 </script>
