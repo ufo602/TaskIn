@@ -5,6 +5,10 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.12.0 (2026-06-23)
+    - 과부하 방지: 진행중(WIP) 동시 작업 제한 추가 — 칸반 '진행중' 칼럼이 제한을 넘으면 경고 표시
+    - 정체 태스크 감지 — 진행중/보류 상태가 5일 이상 멈춰있으면 🐢 배지로 표시
+    - 대시보드에 과부하 경고 카드 추가 (WIP 초과 + 정체 태스크 목록)
   v2.11.1 (2026-06-23)
     - 패치노트 첫 표시 버그 수정 — 기존 사용자에게 팝업이 처음 한 번 안 뜨던 문제
     - 신규 사용자는 가입 시점에 seen_version을 기록해 팝업 제외
@@ -55,7 +59,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.11.1 - 스마트 워크스페이스</title>
+<title>TaskIn v2.12.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -462,6 +466,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
         <div class="metric"><div class="metric-val" style="color:var(--amb)" id="d-week">0</div><div class="metric-lbl">이번 주</div></div>
         <div class="metric"><div class="metric-val" style="color:var(--grn)" id="d-points">0</div><div class="metric-lbl">달성 기여도(Pt)</div></div>
       </div>
+      <div id="overload-banner"></div>
       <div class="grid2">
         <div class="card" style="margin-bottom:0;">
           <span class="sec-label">마감 임박 태스크</span>
@@ -1116,11 +1121,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.11.1";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.12.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.12.0", date: "2026-06-23", title: "과부하 방지 (WIP 제한 & 정체 감지)", items: [
+    "칸반 '진행중' 칼럼에 동시 작업 제한(WIP) 설정 — 너무 많이 벌이면 경고",
+    "진행중·보류 상태가 5일 이상 멈춰있으면 🐢 정체 배지로 알림",
+    "대시보드에 과부하 경고 카드 추가 (WIP 초과 + 정체된 일 목록)",
+  ]},
   { version: "2.11.1", date: "2026-06-23", title: "패치노트 첫 표시 버그 수정", items: [
     "기존 사용자에게 '새로워진 점' 팝업이 처음 한 번 뜨지 않던 문제 수정",
     "신규 사용자에게는 가입 시점부터 팝업이 뜨지 않도록 정리",
@@ -1166,6 +1176,20 @@ let reportPeriod = 'week';
 // 아이젠하워 상수
 const EI_LABELS = { q1:'🔴 즉시실행', q2:'🔵 계획수립', q3:'🟡 위임검토', q4:'⚪ 제거검토' };
 const EI_BADGE  = { q1:'badge-q1',    q2:'badge-q2',    q3:'badge-q3',    q4:'badge-q4' };
+
+// ════════ 과부하 방지 (WIP 제한 · 정체 감지) ════════
+const STALE_DAYS = 5; // 진행중/보류 상태가 이 기간(일) 이상 멈춰있으면 "정체"로 표시
+function getWipLimit() { return parseInt(localStorage.getItem('taskin_wip_limit'), 10) || 3; }
+function daysSince(iso) { if (!iso) return 0; return Math.floor((TODAY - new Date(iso)) / 86400000); }
+function isStale(t) { return (t.st === 'doing' || t.st === 'hold') && daysSince(t.stChangedAt) >= STALE_DAYS; }
+function editWipLimit() {
+  const v = prompt('⚡ 진행중(WIP) 동시 작업 제한 — 한 번에 너무 많은 일을 벌이지 않도록 권장 개수를 정하세요.', getWipLimit());
+  if (v === null) return;
+  const n = parseInt(v, 10);
+  if (!n || n < 1) return alert('1 이상의 숫자를 입력해주세요.');
+  localStorage.setItem('taskin_wip_limit', String(n));
+  renderBoard(); renderDashboard();
+}
 
 // 상태 상수
 const STATUS_CYCLE = ['todo','doing','hold','done'];
@@ -1262,6 +1286,16 @@ function loadAll() {
     if (!t.folderPath) t.folderPath = '';
     if (!t.ei)         t.ei = null;
     if (t.repeat === undefined) t.repeat = null;
+    // WIP·정체 감지 도입 이전 데이터 백필: history에서 마지막 상태변경 시각 추정, 없으면 오늘로(과잉 경고 방지)
+    if (t.stChangedAt === undefined) {
+      const last = t.history?.slice().reverse().find(h => h.text.includes('보드 이동') || h.text.includes('상태 변경'));
+      if (last) {
+        const md = last.time.split(' ')[0].split('.');
+        t.stChangedAt = md.length >= 2
+          ? `${new Date().getFullYear()}-${String(parseInt(md[0])).padStart(2,'0')}-${String(parseInt(md[1])).padStart(2,'0')}`
+          : todayISO();
+      } else t.stChangedAt = todayISO();
+    }
     // 완료 시점 백필: 기존 done 태스크에 completedAt이 없으면 history에서 추정
     if (t.completedAt === undefined) {
       if (t.st === 'done') {
@@ -1459,11 +1493,16 @@ function renderBoard() {
     done:  { label:'완료',  icon:'✅', color:'var(--grn)', bg:'var(--grn-bg)' },
   };
   const checkIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+  const wipLimit = getWipLimit();
 
   const board = document.getElementById('kanban-board');
   board.innerHTML = cols.map(st => {
     const items = getOrderedColItems(st, list);
     const m = colMeta[st];
+    const overWip = st === 'doing' && items.length > wipLimit;
+    const countHtml = st === 'doing'
+      ? `<span class="kanban-col-count" style="background:${overWip?'var(--red-bg)':m.bg};color:${overWip?'var(--red)':m.color};cursor:pointer;" onclick="editWipLimit()" title="클릭하여 WIP 제한 변경">${overWip?'⚠️ ':''}${items.length}/${wipLimit}</span>`
+      : `<span class="kanban-col-count" style="background:${m.bg};color:${m.color};">${items.length}</span>`;
     return `
       <div class="kanban-col" id="col-${st}"
         ondragover="onColDragOver(event,'${st}')"
@@ -1474,11 +1513,12 @@ function renderBoard() {
             <span style="font-size:16px;">${m.icon}</span>
             <span class="kanban-col-title">${m.label}</span>
           </div>
-          <span class="kanban-col-count" style="background:${m.bg};color:${m.color};">${items.length}</span>
+          ${countHtml}
         </div>
         <div class="kanban-cards-wrap" id="cards-${st}">
           ${items.map(t => {
-            const eiHtml   = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 6px;">${EI_LABELS[t.ei]}</span>` : '';
+            const eiHtml    = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 6px;">${EI_LABELS[t.ei]}</span>` : '';
+            const staleHtml = isStale(t) ? `<span class="badge" style="font-size:10px;padding:2px 6px;background:var(--red-bg);color:var(--red);" title="${daysSince(t.stChangedAt)}일째 ${STATUS_LABEL[t.st]} 상태에서 멈춰있어요">🐢 ${daysSince(t.stChangedAt)}일째</span>` : '';
             const tagsHtml = (t.tags||[]).slice(0,2).map(tag => `<span class="task-tag" style="margin-left:0;font-size:10px;">#${tag}</span>`).join('');
             return `
               <div class="kanban-card"
@@ -1498,6 +1538,7 @@ function renderBoard() {
                   <span class="badge badge-${t.urg}" style="font-size:10px;padding:2px 7px;">${t.dl}</span>
                   <span style="font-size:10px;font-weight:700;color:var(--pur);background:var(--pur-bg);border-radius:6px;padding:2px 6px;">${t.points}pt</span>
                   ${eiHtml}
+                  ${staleHtml}
                   ${tagsHtml}
                 </div>
                 ${t.req ? `<div style="font-size:11px;color:var(--t3);font-weight:600;margin-top:8px;">👤 ${t.req}</div>` : ''}
@@ -1576,7 +1617,7 @@ function onCardDrop(e, targetId, targetSt) {
 
   // 1) 칼럼 간 이동이면 st 변경
   if (srcTask.st !== targetSt) {
-    const old = srcTask.st; srcTask.st = targetSt;
+    const old = srcTask.st; srcTask.st = targetSt; srcTask.stChangedAt = todayISO();
     srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[targetSt]}`, time:getCurrentDateTime() });
     // 출발 칼럼 order에서 제거
     kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== dragSrcId);
@@ -1620,7 +1661,7 @@ function onColDrop(e, st) {
   if (!srcTask) return;
 
   if (srcTask.st !== st) {
-    const old = srcTask.st; srcTask.st = st;
+    const old = srcTask.st; srcTask.st = st; srcTask.stChangedAt = todayISO();
     srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[st]}`, time:getCurrentDateTime() });
     kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== dragSrcId);
   }
@@ -1704,6 +1745,7 @@ function renderList() {
         </td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <span class="badge" style="cursor:pointer;transition:all 0.2s;box-shadow:var(--shadow-sm);background:${STATUS_BG[t.st]};color:${STATUS_COLOR[t.st]};" onclick="cycleTaskStatus(${t.id})">${STATUS_LABEL[t.st]}</span>
+          ${isStale(t) ? `<span class="badge" style="font-size:10px;padding:2px 6px;margin-left:4px;background:var(--red-bg);color:var(--red);" title="${daysSince(t.stChangedAt)}일째 ${STATUS_LABEL[t.st]} 상태에서 멈춰있어요">🐢 ${daysSince(t.stChangedAt)}일</span>` : ''}
         </td>
         <td style="text-align:center;">
           <button onclick="event.stopPropagation();deleteTaskById(${t.id})" style="background:transparent;border:none;cursor:pointer;color:var(--border2);padding:8px;border-radius:8px;transition:all 0.2s;" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-bg)';" onmouseout="this.style.color='var(--border2)';this.style.background='transparent';">
@@ -1728,6 +1770,23 @@ function renderDashboard() {
   const doneTasks = tasks.filter(t => t.st === 'done');
   const totalPts  = doneTasks.reduce((a,c) => a + (c.points||1), 0);
   document.getElementById('d-points').textContent = totalPts;
+
+  // 과부하 경고 — WIP 초과 + 정체된 일
+  const banner = document.getElementById('overload-banner');
+  const wipLimit = getWipLimit();
+  const doingCount = tasks.filter(t => t.st === 'doing').length;
+  const staleTasks = tasks.filter(isStale);
+  if (doingCount > wipLimit || staleTasks.length) {
+    const wipLine = doingCount > wipLimit
+      ? `<div style="margin-bottom:${staleTasks.length?'10px':'0'};">⚡ <b>진행중인 일이 ${doingCount}개</b>로 제한(${wipLimit}개)을 넘었어요. <span style="text-decoration:underline;cursor:pointer;" onclick="showPage('list',document.querySelectorAll('.nav-item')[1]);setView('board');" title="칸반 보드로 이동">새로 시작하기 전에 먼저 끝내보세요</span>.</div>`
+      : '';
+    const staleLine = staleTasks.length
+      ? `<div>🐢 <b>${staleTasks.length}개</b>가 ${STALE_DAYS}일 이상 멈춰있어요 — ${staleTasks.slice(0,3).map(t=>`<span style="text-decoration:underline;cursor:pointer;" onclick="openModal(${t.id})">${t.title.length>14?t.title.slice(0,14)+'…':t.title}</span>`).join(', ')}${staleTasks.length>3?` 외 ${staleTasks.length-3}건`:''}</div>`
+      : '';
+    banner.innerHTML = `<div class="card" style="margin-bottom:16px;border-color:var(--amb);background:var(--amb-bg);color:var(--t1);font-size:13px;font-weight:600;line-height:1.7;">${wipLine}${staleLine}</div>`;
+  } else {
+    banner.innerHTML = '';
+  }
 
   // 타임라인
   const tl = document.getElementById('dash-timeline');
@@ -1837,7 +1896,7 @@ function addTask() {
   const newTask = { id:nextId++, title, tags, points, retro:'', rawDate:date, req, cat, st:'todo',
     dlv:dlvFromDate(date), dl:formatDl(date), urg:urgFromDlv(dlvFromDate(date)),
     memo:'', history:[{text:'새 할 일 등록됨', time:getCurrentDateTime()}],
-    subtasks:[], folderPath:'', ei:null, repeat:null };
+    subtasks:[], folderPath:'', ei:null, repeat:null, stChangedAt:todayISO() };
   tasks.push(newTask);
   document.getElementById('task-title').value = '';
   document.getElementById('task-tags-input').value = '';
@@ -1878,7 +1937,7 @@ function spawnNextRecurrence(t) {
     dlv:dlvFromDate(nextDate), dl:formatDl(nextDate), urg:urgFromDlv(dlvFromDate(nextDate)),
     memo:t.memo||'', history:[{text:`🔁 반복 태스크 자동 생성 (이전: ${t.dl})`, time:getCurrentDateTime()}],
     subtasks:(t.subtasks||[]).map(s=>({text:s.text,done:false})), folderPath:t.folderPath||'',
-    ei:t.ei||null, repeat:t.repeat
+    ei:t.ei||null, repeat:t.repeat, stChangedAt:todayISO()
   };
   tasks.push(newTask);
   showToast(`🔁 반복 태스크 "${t.title.length>12?t.title.slice(0,12)+'…':t.title}" 다음 주기(${formatDl(nextDate)})가 생성되었습니다.`, 'acc', 4000);
@@ -1917,7 +1976,7 @@ function updateTaskReqPrompt(id) {
 }
 function cycleTaskStatus(id) {
   const t = tasks.find(x => x.id === id); if (!t) return;
-  const i = STATUS_CYCLE.indexOf(t.st); t.st = STATUS_CYCLE[(i+1)%STATUS_CYCLE.length];
+  const i = STATUS_CYCLE.indexOf(t.st); t.st = STATUS_CYCLE[(i+1)%STATUS_CYCLE.length]; t.stChangedAt = todayISO();
   t.history.push({ text:`🔄 상태 변경: ${STATUS_LABEL[t.st]}`, time:getCurrentDateTime() });
   if (t.st === 'done') { if (!t.completedAt) t.completedAt = todayISO(); }
   else t.completedAt = null;
@@ -3065,7 +3124,7 @@ async function handleAIParse() {
     return null;
   }
   const autoEi = estimateEi(successData.date, successData.title||'', successData.memo||'');
-  const newTask = { id:nextId++, title:successData.title||'새 할 일', tags:successData.tags||[], points:1, retro:'', rawDate:successData.date||'', req:successData.req||'', cat:'work', st:'todo', dlv:dlvFromDate(successData.date), dl:formatDl(successData.date), urg:urgFromDlv(dlvFromDate(successData.date)), memo:successData.memo||'', history:[{text:'✨ AI 스캔으로 자동 생성됨 (Groq)',time:getCurrentDateTime()}], subtasks:[], folderPath:'', ei:autoEi };
+  const newTask = { id:nextId++, title:successData.title||'새 할 일', tags:successData.tags||[], points:1, retro:'', rawDate:successData.date||'', req:successData.req||'', cat:'work', st:'todo', dlv:dlvFromDate(successData.date), dl:formatDl(successData.date), urg:urgFromDlv(dlvFromDate(successData.date)), memo:successData.memo||'', history:[{text:'✨ AI 스캔으로 자동 생성됨 (Groq)',time:getCurrentDateTime()}], subtasks:[], folderPath:'', ei:autoEi, stChangedAt:todayISO() };
   tasks.push(newTask); saveAll(); renderCurrentView(); renderDashboard(); closeAllModals(); setTimeout(()=>openModal(newTask.id),300);
 }
 
@@ -3132,7 +3191,7 @@ function confirmFolderTasks() {
       rawDate:'', req:'', cat:'work', st:'todo', dlv:99, dl:'미정', urg:'ok',
       memo:`[📁 로컬 폴더 연동]\n관련 파일 목록:\n${t.files.map(f=>'- '+f).join('\n')}`,
       history:[{text:'📁 폴더 인식으로 자동 생성',time}],
-      subtasks:[], folderPath: relativePath, ei:null
+      subtasks:[], folderPath: relativePath, ei:null, stChangedAt:todayISO()
     });
   });
   saveAll(); renderCurrentView(); renderDashboard(); closeAllModals();
@@ -3330,7 +3389,7 @@ function importData(event) {
       if(!confirm(`${verInfo}기존 데이터를 덮어씌우고 이 백업을 불러올까요?`)){ event.target.value=''; return; }
       tasks=data.tasks; wikiItems=data.wikiItems||[]; trashBin=data.trashBin||[]; nextId=data.nextId||100;
       kanbanOrder=data.kanbanOrder||{ todo:[], doing:[], hold:[], done:[] };
-      tasks.forEach(t=>{ if(!t.tags) t.tags=[]; if(!t.points) t.points=1; if(!t.retro) t.retro=''; if(!t.subtasks) t.subtasks=[]; if(!t.folderPath) t.folderPath=''; if(!t.ei) t.ei=null; if(t.repeat===undefined) t.repeat=null; if(t.completedAt===undefined) t.completedAt=(t.st==='done'?todayISO():null); });
+      tasks.forEach(t=>{ if(!t.tags) t.tags=[]; if(!t.points) t.points=1; if(!t.retro) t.retro=''; if(!t.subtasks) t.subtasks=[]; if(!t.folderPath) t.folderPath=''; if(!t.ei) t.ei=null; if(t.repeat===undefined) t.repeat=null; if(t.completedAt===undefined) t.completedAt=(t.st==='done'?todayISO():null); if(t.stChangedAt===undefined) t.stChangedAt=todayISO(); });
       // 백업에 저장된 사용자명이 있으면 복원 제안
       if (data.user && data.user !== localStorage.getItem('taskin_user')) {
         if (confirm(`백업의 사용자 이름 "${data.user}"으로 변경할까요?`)) {
