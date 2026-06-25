@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.13.0 (2026-06-25)
+    - 백업 자동화: 마지막 백업 시점 추적 + 권장 주기(기본 7일) 초과 시 대시보드 배너·토스트 안내
+    - 자동 백업 옵션(켜면 주기 경과 후 앱 열 때 .json 자동 내려받기) + 주기 설정 변경
+    - 자정 롤오버 수정: 탭을 켜둔 채 날짜가 바뀌어도 '오늘 마감'·D-day가 자동 갱신
+    - 앱 로드/재포커스 시 모든 태스크의 마감 잔여일(dlv) 재계산 (저장된 값 노후화 방지)
   v2.12.0 (2026-06-23)
     - 과부하 방지: 진행중(WIP) 동시 작업 제한 추가 — 칸반 '진행중' 칼럼이 제한을 넘으면 경고 표시
     - 정체 태스크 감지 — 진행중/보류 상태가 5일 이상 멈춰있으면 🐢 배지로 표시
@@ -59,7 +64,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.12.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.13.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -466,6 +471,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
         <div class="metric"><div class="metric-val" style="color:var(--amb)" id="d-week">0</div><div class="metric-lbl">이번 주</div></div>
         <div class="metric"><div class="metric-val" style="color:var(--grn)" id="d-points">0</div><div class="metric-lbl">달성 기여도(Pt)</div></div>
       </div>
+      <div id="backup-banner"></div>
       <div id="overload-banner"></div>
       <div class="grid2">
         <div class="card" style="margin-bottom:0;">
@@ -1121,11 +1127,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.12.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.13.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.13.0", date: "2026-06-25", title: "백업 자동화 & 자정 자동 갱신", items: [
+    "마지막 백업 시점을 추적해, 권장 주기(기본 7일)가 지나면 대시보드에서 백업을 안내",
+    "자동 백업 옵션 — 켜두면 주기가 지났을 때 앱을 열 때 .json을 자동으로 내려받아요",
+    "자정이 지나도 '오늘 마감'·D-day가 자동으로 갱신되도록 수정",
+  ]},
   { version: "2.12.0", date: "2026-06-23", title: "과부하 방지 (WIP 제한 & 정체 감지)", items: [
     "칸반 '진행중' 칼럼에 동시 작업 제한(WIP) 설정 — 너무 많이 벌이면 경고",
     "진행중·보류 상태가 5일 이상 멈춰있으면 🐢 정체 배지로 알림",
@@ -1160,7 +1171,7 @@ const RELEASE_NOTES = [
 ];
 
 // ════════ 전역 상태 ════════
-const TODAY = new Date();
+let TODAY = new Date();
 let nextId = 100;
 let tasks = [];
 let wikiItems = [];
@@ -1232,6 +1243,39 @@ function formatBytes(b) {
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + 'KB';
   return (b / 1024 / 1024).toFixed(2) + 'MB';
 }
+// ════════ 백업 자동화 ════════
+const BACKUP_REMINDER_DAYS = 7; // 기본 권장 주기(일)
+function getBackupInterval() { return parseInt(localStorage.getItem('taskin_backup_interval'), 10) || BACKUP_REMINDER_DAYS; }
+function getLastBackup() { return localStorage.getItem('taskin_last_backup'); }
+function daysSinceBackup() { const b = getLastBackup(); if (!b) return null; return Math.floor((Date.now() - new Date(b).getTime()) / 86400000); }
+function isBackupOverdue() {
+  if (!tasks.length) return false; // 백업할 데이터가 없으면 권하지 않음
+  const d = daysSinceBackup();
+  return d === null || d >= getBackupInterval();
+}
+function isAutoBackupOn() { return localStorage.getItem('taskin_autobackup') === 'on'; }
+function recordBackup() {
+  localStorage.setItem('taskin_last_backup', new Date().toISOString());
+  updateStorageMeter();
+  const bb = document.getElementById('backup-banner'); if (bb) renderDashboard();
+}
+function toggleAutoBackup() {
+  const on = !isAutoBackupOn();
+  localStorage.setItem('taskin_autobackup', on ? 'on' : 'off');
+  showToast(on
+    ? '🔄 자동 백업을 켰어요 — 권장 주기가 지나면 앱을 열 때 .json을 자동으로 내려받아요.'
+    : '자동 백업을 껐어요. 필요할 때 직접 백업하세요.', on ? 'acc' : 'amb', 4500);
+  renderDashboard();
+}
+function changeBackupInterval() {
+  const v = prompt('백업 권장 주기를 며칠로 할까요? (예: 7)', getBackupInterval());
+  if (v === null) return;
+  const n = parseInt(v, 10);
+  if (!n || n < 1) return alert('1 이상의 숫자를 입력해주세요.');
+  localStorage.setItem('taskin_backup_interval', String(n));
+  renderDashboard();
+}
+
 function updateStorageMeter() {
   const meterEl = document.getElementById('storage-meter');
   if (!meterEl) return;
@@ -1249,7 +1293,9 @@ function updateStorageMeter() {
   } else if (pct >= 70) {
     subEl.textContent = `${formatBytes(used)} 사용 중 — 슬슬 백업을 권장해요 (클릭하면 백업).`;
   } else {
-    subEl.textContent = '데이터는 이 브라우저에만 저장돼요. 캐시 삭제 시 사라지니 주기적으로 백업하세요.';
+    const d = daysSinceBackup();
+    const bk = d === null ? '아직 백업 기록이 없어요.' : `마지막 백업: ${d === 0 ? '오늘' : d + '일 전'}.`;
+    subEl.textContent = `${bk} 캐시 삭제 시 사라지니 주기적으로 백업하세요.`;
   }
 
   if (pct >= 90 && _storageWarnedLevel < 2) {
@@ -1335,6 +1381,37 @@ function formatDl(s) {
   const p = s.split('-'); return `${p[1]}.${p[2]}`;
 }
 function urgFromDlv(v) { return v <= 0 ? 'urgent' : v <= 5 ? 'warn' : 'ok'; }
+
+// ════════ 날짜 컨텍스트 자동 갱신 (자정 롤오버 / 재포커스) ════════
+// 저장된 dlv/dl/urg는 생성·수정 시점 기준이라, 날이 바뀌면 노후화된다.
+// rawDate로부터 매번 다시 계산해 '오늘 마감'·D-day를 항상 정확히 유지한다.
+let _todayStr = todayISO();
+let _midnightTimer = null;
+function recomputeTaskDates() {
+  tasks.forEach(t => {
+    t.dlv = dlvFromDate(t.rawDate);
+    t.dl  = formatDl(t.rawDate);
+    t.urg = t.st === 'done' ? 'ok' : urgFromDlv(t.dlv);
+  });
+}
+function scheduleMidnightRollover() {
+  if (_midnightTimer) clearTimeout(_midnightTimer);
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5); // 자정 +5초
+  _midnightTimer = setTimeout(() => refreshDateContext(true), next - now);
+}
+function refreshDateContext(force) {
+  const nowStr = todayISO();
+  if (!force && nowStr === _todayStr) return; // 같은 날이면 할 일 없음
+  _todayStr = nowStr;
+  TODAY = new Date();
+  recomputeTaskDates();
+  const app = document.getElementById('app');
+  if (app && app.style.display !== 'none') {
+    renderDashboard(); renderCurrentView(); renderNotif();
+  }
+  scheduleMidnightRollover();
+}
 function getCurrentDateTime() {
   const n = new Date();
   return `${String(n.getMonth()+1).padStart(2,'0')}.${String(n.getDate()).padStart(2,'0')} ${n.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`;
@@ -1770,6 +1847,25 @@ function renderDashboard() {
   const doneTasks = tasks.filter(t => t.st === 'done');
   const totalPts  = doneTasks.reduce((a,c) => a + (c.points||1), 0);
   document.getElementById('d-points').textContent = totalPts;
+
+  // 백업 권장 배너 — 마지막 백업이 권장 주기를 넘었을 때
+  const bb = document.getElementById('backup-banner');
+  if (bb) {
+    if (isBackupOverdue()) {
+      const d = daysSinceBackup();
+      const when = d === null ? '아직 백업한 적이 없어요' : `마지막 백업이 ${d}일 전이에요`;
+      bb.innerHTML = `<div class="card" style="margin-bottom:16px;border-color:var(--acc);background:var(--acc-bg);color:var(--t1);font-size:13px;font-weight:600;line-height:1.7;">
+        💾 <b>${when}.</b> 데이터는 이 브라우저에만 있으니 지금 백업해두는 걸 권장해요.
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary" style="padding:7px 14px;font-size:13px;" onclick="exportData()">지금 백업</button>
+          <button class="btn" style="padding:7px 14px;font-size:13px;background:var(--surface2);color:var(--t2);" onclick="toggleAutoBackup()">${isAutoBackupOn() ? '자동 백업 끄기' : '자동 백업 켜기'}</button>
+          <button class="btn" style="padding:7px 14px;font-size:13px;background:transparent;color:var(--t3);" onclick="changeBackupInterval()">주기 변경 (현재 ${getBackupInterval()}일)</button>
+        </div>
+      </div>`;
+    } else {
+      bb.innerHTML = '';
+    }
+  }
 
   // 과부하 경고 — WIP 초과 + 정체된 일
   const banner = document.getElementById('overload-banner');
@@ -3260,6 +3356,8 @@ function exportData() {
   a.download = `taskin_backup_v${APP_VERSION}_${new Date().toISOString().split('T')[0]}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  recordBackup();
+  showToast('✅ 백업 파일(.json)을 내려받았어요. 안전한 곳에 보관하세요!', 'grn', 4000);
 }
 
 function exportICS() {
@@ -3455,6 +3553,11 @@ function applyTheme() {
 (function init() {
   applyTheme();
   loadAll();
+  recomputeTaskDates();      // 저장된 dlv/dl/urg를 오늘 기준으로 다시 계산 (세션 간 노후화 방지)
+  _todayStr = todayISO();
+  scheduleMidnightRollover(); // 자정 넘어가면 자동 갱신
+  // 탭을 다시 보면 날짜 변경 여부 확인 후 갱신
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateContext(false); });
   // 버전 표시 자동 주입
   const sv = document.getElementById('sidebar-version'); if (sv) sv.textContent = `Smart Workspace v${APP_VERSION}`;
   const ov = document.getElementById('ob-version');      if (ov) ov.textContent = `v${APP_VERSION} — Smart Workspace`;
@@ -3465,6 +3568,16 @@ function applyTheme() {
     document.getElementById('app').style.display='flex';
     renderDashboard(); renderCurrentView(); renderWikiList(); updateTrashBadge(); renderTrash(); renderNotif(); updateStorageMeter();
     checkVersionUpdate();
+    // 백업 자동화: 주기 경과 시 자동 백업(켜둔 경우) 또는 1회 안내 토스트
+    if (isBackupOverdue()) {
+      if (isAutoBackupOn()) {
+        setTimeout(exportData, 1500); // 자동 다운로드 (exportData가 마지막 백업 시점 기록)
+      } else if (!sessionStorage.getItem('backup_reminded')) {
+        sessionStorage.setItem('backup_reminded', '1');
+        const d = daysSinceBackup();
+        showToast(`💾 ${d === null ? '아직 백업한 적이 없어요' : `마지막 백업이 ${d}일 전이에요`}. 대시보드에서 백업을 권장해요.`, 'amb', 5000);
+      }
+    }
   }
 })();
 </script>
