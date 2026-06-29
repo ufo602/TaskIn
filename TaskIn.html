@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.15.0 (2026-06-29)
+    - 기능: 모바일/태블릿 칸반 터치 드래그 — 카드를 길게 눌러 칼럼 이동·순서 변경 (네이티브 HTML5 DnD는 터치 미지원)
+    - 드래그 중 손가락을 따라오는 카드 복제본 + 드롭 위치 인디케이터, 탭은 상세 열기·즉시 스와이프는 보드 스크롤로 구분
+    - 리팩터링: 마우스·터치 드롭의 칼럼 이동/순서 로직을 applyCardMove() 한 곳으로 통합 (중복 제거)
+
   v2.14.1 (2026-06-29)
     - 성능: 상세 모달에서 항목을 편집할수록 점점 느려지던 문제 개선
     - 성능: 저장 시마다 localStorage 전체를 재스캔하던 저장공간 계산 비용 제거 (직렬화 문자열 길이로 추정)
@@ -76,7 +81,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.14.1 - 스마트 워크스페이스</title>
+<title>TaskIn v2.15.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -187,7 +192,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 .kanban-col-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:0 4px;}
 .kanban-col-title{font-size:14px;font-weight:800;color:var(--t1);}
 .kanban-col-count{font-size:12px;font-weight:800;border-radius:8px;padding:3px 9px;background:var(--surface);color:var(--t3);border:1px solid var(--border);}
-.kanban-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:10px;cursor:grab;transition:all 0.2s ease;box-shadow:var(--shadow-sm);user-select:none;}
+.kanban-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:10px;cursor:grab;transition:all 0.2s ease;box-shadow:var(--shadow-sm);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}
 .kanban-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px);border-color:var(--border2);}
 .kanban-card.dragging{opacity:0.4;cursor:grabbing;transform:rotate(2deg) scale(0.97);}
 .kanban-card-title{font-size:14px;font-weight:700;color:var(--t1);margin-bottom:10px;line-height:1.4;}
@@ -1139,11 +1144,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.14.1";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.15.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.15.0", date: "2026-06-29", title: "모바일 칸반 터치 드래그", items: [
+    "모바일·태블릿에서 칸반 카드를 길게 눌러 끌어 옮길 수 있게 되었어요 (칼럼 이동·순서 변경 모두 지원)",
+    "드래그 중 카드가 손가락을 따라오고, 놓을 위치가 파란 선으로 표시돼요",
+    "카드를 살짝 탭하면 기존처럼 상세가 열리고, 바로 쓸어내리면 보드가 스크롤돼요",
+  ]},
   { version: "2.14.1", date: "2026-06-29", title: "성능 최적화", items: [
     "상세 모달에서 항목을 편집할수록 점점 느려지던 문제 개선",
     "저장할 때마다 저장공간 전체를 다시 스캔하던 비용 제거 (저장 횟수와 무관하게 빠르게)",
@@ -1663,6 +1673,7 @@ function renderBoard() {
                 ondragend="onCardDragEnd(event)"
                 ondragover="onCardDragOver(event,'${st}')"
                 ondrop="onCardDrop(event,${t.id},'${st}')"
+                ontouchstart="onCardTouchStart(event,${t.id},'${st}')"
                 onclick="openModal(${t.id})">
                 <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
                   <div class="subtask-cb ${t.st==='done'?'done':''}" style="margin-top:2px;flex-shrink:0;" onclick="event.stopPropagation();toggleDone(${t.id})">${t.st==='done'?checkIcon:''}</div>
@@ -1692,6 +1703,35 @@ let dragSrcId   = null;
 let dragSrcSt   = null;   // 출발 칼럼
 let dropTargetId = null;  // 현재 호버 중인 카드 id
 let dropPosition = null;  // 'before' | 'after'
+
+// 카드를 targetSt 칼럼의 beforeId 카드 '앞'에 삽입 (beforeId 없으면 맨 끝). 마우스·터치 드롭 공통 경로.
+function applyCardMove(srcId, targetSt, beforeId) {
+  const srcTask = tasks.find(x => x.id === srcId);
+  if (!srcTask) return;
+  if (srcTask.st !== targetSt) {
+    const old = srcTask.st;
+    srcTask.st = targetSt;
+    srcTask.stChangedAt = todayISO();
+    srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[targetSt]}`, time:getCurrentDateTime() });
+    kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== srcId);
+  }
+  syncKanbanOrder();
+  let order = [...kanbanOrder[targetSt]].filter(id => id !== srcId);
+  const idx = (beforeId != null) ? order.indexOf(beforeId) : -1;
+  if (idx === -1) order.push(srcId);
+  else order.splice(idx, 0, srcId);
+  kanbanOrder[targetSt] = order;
+  saveAll(); renderBoard(); renderDashboard();
+}
+
+// 드롭 위치(before/after) + 기준 카드 id → 삽입 기준이 될 beforeId 계산
+function computeBeforeId(targetSt, targetId, srcId, pos) {
+  if (pos === 'before') return targetId;
+  syncKanbanOrder();
+  const ord = (kanbanOrder[targetSt]||[]).filter(id => id !== srcId);
+  const i = ord.indexOf(targetId);
+  return (i >= 0 && i + 1 < ord.length) ? ord[i + 1] : null;
+}
 
 function onCardDragStart(e, id, st) {
   dragSrcId = id; dragSrcSt = st;
@@ -1746,31 +1786,8 @@ function onCardDrop(e, targetId, targetSt) {
 
   if (dragSrcId === null || dragSrcId === targetId) { dragSrcId = null; dragSrcSt = null; return; }
 
-  const srcTask = tasks.find(x => x.id === dragSrcId);
-  if (!srcTask) return;
-
-  // 1) 칼럼 간 이동이면 st 변경
-  if (srcTask.st !== targetSt) {
-    const old = srcTask.st; srcTask.st = targetSt; srcTask.stChangedAt = todayISO();
-    srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[targetSt]}`, time:getCurrentDateTime() });
-    // 출발 칼럼 order에서 제거
-    kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== dragSrcId);
-  }
-
-  // 2) 대상 칼럼 order에서 드래그 카드 제거 후 targetId 앞/뒤에 삽입
-  const col = targetSt;
-  syncKanbanOrder();
-  let order = [...kanbanOrder[col]].filter(id => id !== dragSrcId);
-  const insertIdx = order.indexOf(targetId);
-  if (insertIdx === -1) {
-    order.push(dragSrcId);
-  } else {
-    const pos = dropPosition || 'after';
-    order.splice(pos === 'before' ? insertIdx : insertIdx + 1, 0, dragSrcId);
-  }
-  kanbanOrder[col] = order;
-
-  saveAll(); renderBoard(); renderDashboard();
+  const beforeId = computeBeforeId(targetSt, targetId, dragSrcId, dropPosition || 'after');
+  applyCardMove(dragSrcId, targetSt, beforeId);
   dragSrcId = null; dragSrcSt = null; dropTargetId = null; dropPosition = null;
 }
 
@@ -1792,20 +1809,125 @@ function onColDrop(e, st) {
   if (dragSrcId === null) return;
 
   const srcTask = tasks.find(x => x.id === dragSrcId);
-  if (!srcTask) return;
+  if (!srcTask) { dragSrcId = null; dragSrcSt = null; return; }
 
-  if (srcTask.st !== st) {
-    const old = srcTask.st; srcTask.st = st; srcTask.stChangedAt = todayISO();
-    srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[st]}`, time:getCurrentDateTime() });
-    kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== dragSrcId);
-  }
+  // 같은 칼럼의 빈 영역에 떨어뜨리면 위치 유지(기존 동작), 다른 칼럼이면 맨 끝으로 이동
+  if (srcTask.st !== st) applyCardMove(dragSrcId, st, null);
 
-  // 칼럼 맨 끝에 추가
-  syncKanbanOrder();
-  if (!kanbanOrder[st].includes(dragSrcId)) kanbanOrder[st].push(dragSrcId);
-
-  saveAll(); renderBoard(); renderDashboard();
   dragSrcId = null; dragSrcSt = null; dropTargetId = null; dropPosition = null;
+}
+
+// ── 모바일 터치 드래그 (네이티브 HTML5 DnD는 터치 이벤트를 발생시키지 않아 모바일에서 동작하지 않음) ──
+// 길게 누르면 드래그 모드 진입 → 손가락을 따라 카드 복제본 이동 → 놓으면 그 위치로 이동.
+// 탭하면 기존처럼 상세 모달이 열리고(클릭 유지), 바로 스와이프하면 보드 스크롤이 허용된다.
+let touchDrag = null;
+
+function onCardTouchStart(e, id, st) {
+  if (e.touches.length !== 1) return;
+  const tp = e.touches[0];
+  touchDrag = {
+    id, srcSt: st, card: e.currentTarget,
+    startX: tp.clientX, startY: tp.clientY,
+    active: false, dragged: false, clone: null, offX: 0, offY: 0,
+    targetSt: st, beforeId: null,
+    lpTimer: setTimeout(() => { if (touchDrag) enterTouchDrag(); }, 230)
+  };
+  document.addEventListener('touchmove', onCardTouchMove, { passive: false });
+  document.addEventListener('touchend', onCardTouchEnd);
+  document.addEventListener('touchcancel', onCardTouchEnd);
+}
+
+function enterTouchDrag() {
+  const d = touchDrag; if (!d) return;
+  d.active = true;
+  const r = d.card.getBoundingClientRect();
+  d.offX = d.startX - r.left;
+  d.offY = d.startY - r.top;
+  const clone = d.card.cloneNode(true);
+  clone.className = 'kanban-card touch-drag-clone';
+  clone.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;margin:0;pointer-events:none;z-index:3000;opacity:.95;transform:rotate(2deg);box-shadow:var(--shadow-lg);`;
+  document.body.appendChild(clone);
+  d.clone = clone;
+  d.card.classList.add('dragging');
+  if (navigator.vibrate) navigator.vibrate(12);
+}
+
+function onCardTouchMove(e) {
+  const d = touchDrag; if (!d) return;
+  const tp = e.touches[0];
+  if (!d.active) {
+    // 드래그 진입 전 일정 거리 이상 움직이면 스크롤 의도 → 롱프레스 취소 후 기본 스크롤 허용
+    if (Math.abs(tp.clientX - d.startX) > 12 || Math.abs(tp.clientY - d.startY) > 12) endTouchDrag();
+    return;
+  }
+  e.preventDefault(); // 드래그 중 보드/페이지 스크롤 방지
+  d.dragged = true;
+  d.clone.style.left = (tp.clientX - d.offX) + 'px';
+  d.clone.style.top  = (tp.clientY - d.offY) + 'px';
+  // 손가락 아래 요소 탐색 (복제본은 잠시 숨김)
+  d.clone.style.visibility = 'hidden';
+  const under = document.elementFromPoint(tp.clientX, tp.clientY);
+  d.clone.style.visibility = 'visible';
+  updateTouchTarget(under, tp.clientY);
+}
+
+function updateTouchTarget(under, clientY) {
+  const d = touchDrag; if (!d) return;
+  document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+  document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+  const col = under && under.closest ? under.closest('.kanban-col') : null;
+  if (!col) { d.targetSt = null; d.beforeId = null; return; }
+  const st = col.id.replace('col-', '');
+  d.targetSt = st;
+  col.classList.add('drag-over');
+  const overCard = under.closest('.kanban-card');
+  if (overCard && overCard !== d.card && !overCard.classList.contains('touch-drag-clone')) {
+    const rect = overCard.getBoundingClientRect();
+    const before = clientY < rect.top + rect.height / 2;
+    const indicator = document.createElement('div');
+    indicator.className = 'drop-indicator';
+    indicator.style.cssText = 'height:3px;border-radius:3px;background:var(--acc);margin:4px 0;box-shadow:0 0 6px rgba(79,70,229,0.5);';
+    if (before) {
+      overCard.parentNode.insertBefore(indicator, overCard);
+      d.beforeId = parseInt(overCard.dataset.id);
+    } else {
+      overCard.parentNode.insertBefore(indicator, overCard.nextSibling);
+      const wrap = document.getElementById('cards-' + st);
+      const cards = wrap ? [...wrap.querySelectorAll('.kanban-card:not(.touch-drag-clone)')] : [];
+      const pos = cards.indexOf(overCard);
+      d.beforeId = (pos >= 0 && pos + 1 < cards.length) ? parseInt(cards[pos + 1].dataset.id) : null;
+    }
+  } else {
+    d.beforeId = null; // 카드 위가 아니면 칼럼 맨 끝
+  }
+}
+
+function onCardTouchEnd(e) {
+  const d = touchDrag; if (!d) return;
+  if (d.active && d.dragged && d.targetSt) {
+    if (e.cancelable) e.preventDefault(); // 드래그 후 합성 click 억제
+    applyCardMove(d.id, d.targetSt, d.beforeId);
+  }
+  endTouchDrag();
+}
+
+function endTouchDrag() {
+  const d = touchDrag; if (!d) return;
+  clearTimeout(d.lpTimer);
+  if (d.clone) d.clone.remove();
+  if (d.card) d.card.classList.remove('dragging');
+  document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+  document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+  document.removeEventListener('touchmove', onCardTouchMove, { passive: false });
+  document.removeEventListener('touchend', onCardTouchEnd);
+  document.removeEventListener('touchcancel', onCardTouchEnd);
+  if (d.dragged) {
+    // 드래그 직후 합성 클릭 한 번 무시 (모달이 열리지 않도록)
+    const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, true), 400);
+  }
+  touchDrag = null;
 }
 
 // ════════ 리스트 뷰 ════════
