@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.16.0 (2026-06-29)
+    - 접근성: ESC 키로 최상단 모달 닫기 (겹쳐 열린 경우 위에서부터 순차적으로)
+    - 접근성: 모달 열림 중 Tab 포커스 트랩 + 닫을 때 트리거로 포커스 복귀, 모달에 role=dialog/aria-modal 부여
+    - 구현: setupModalA11y() — 모달 표시 토글을 MutationObserver로 감지해 포커스 이동/복귀, 전역 keydown으로 ESC·Tab 처리
+
   v2.15.0 (2026-06-29)
     - 기능: 모바일/태블릿 칸반 터치 드래그 — 카드를 길게 눌러 칼럼 이동·순서 변경 (네이티브 HTML5 DnD는 터치 미지원)
     - 드래그 중 손가락을 따라오는 카드 복제본 + 드롭 위치 인디케이터, 탭은 상세 열기·즉시 스와이프는 보드 스크롤로 구분
@@ -82,7 +87,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.15.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.16.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -1145,11 +1150,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.15.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.16.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.16.0", date: "2026-06-29", title: "키보드·접근성 개선", items: [
+    "ESC 키로 열린 창(모달)을 닫을 수 있어요 — 여러 창이 겹쳐 있으면 맨 위 창부터 차례로",
+    "창이 열려 있는 동안 Tab 키 포커스가 창 안에서만 순환하고, 창을 닫으면 원래 위치로 돌아와요",
+    "스크린리더가 창을 '대화상자'로 인식하도록 보강 (role/aria 속성)",
+  ]},
   { version: "2.15.0", date: "2026-06-29", title: "모바일 칸반 터치 드래그", items: [
     "모바일·태블릿에서 칸반 카드를 길게 눌러 끌어 옮길 수 있게 되었어요 (칼럼 이동·순서 변경 모두 지원)",
     "드래그 중 카드가 손가락을 따라오고, 놓을 위치가 파란 선으로 표시돼요",
@@ -1505,6 +1515,73 @@ function closeTemplateModal(e) {
   if (e && !e.target.classList.contains('modal-overlay')) return;
   const m = document.getElementById('template-modal-overlay');
   m.classList.remove('open'); m.style.display = 'none';
+}
+
+// ════════ 모달 키보드·포커스 접근성 ════════
+// 모달은 열릴 때 display:flex, 닫힐 때 display:none 으로 토글된다.
+function getOpenModals() {
+  return [...document.querySelectorAll('.modal-overlay')].filter(m => m.style.display === 'flex');
+}
+// DOM 뒤쪽 = 더 위에 쌓이는 모달(아이젠하워·정리 미리보기 등은 상세 모달 위에 겹쳐 열림)
+function getTopModal() {
+  const open = getOpenModals();
+  return open.length ? open[open.length - 1] : null;
+}
+function closeModalEl(m) {
+  if (!m) return;
+  m.classList.remove('open');
+  m.style.display = 'none';
+  if (m.id === 'modal-overlay') currentTaskId = null; // 상세 모달을 닫을 때만 현재 태스크 해제
+}
+let _lastNonModalFocus = null;
+function setupModalA11y() {
+  // 1) 시맨틱 속성 — 스크린리더가 대화상자로 인식하고, 컨테이너에 프로그램적 포커스 가능
+  document.querySelectorAll('.modal-overlay').forEach(m => {
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    if (!m.hasAttribute('tabindex')) m.setAttribute('tabindex', '-1');
+  });
+  // 2) 모달 바깥에서 마지막으로 포커스된 요소 추적 → 닫을 때 그곳으로 복귀
+  document.addEventListener('focusin', e => {
+    if (!e.target.closest || !e.target.closest('.modal-overlay')) _lastNonModalFocus = e.target;
+  });
+  // 3) 열림/닫힘 감지: 열리면 모달로 포커스 이동(이미 내부에 포커스가 있으면 유지),
+  //    마지막 모달이 닫히면 트리거로 포커스 복귀
+  const mo = new MutationObserver(muts => {
+    for (const mu of muts) {
+      const m = mu.target;
+      if (!m.classList || !m.classList.contains('modal-overlay')) continue;
+      const open = m.style.display === 'flex';
+      if (open && !m.dataset.a11yOpen) {
+        m.dataset.a11yOpen = '1';
+        setTimeout(() => {
+          if (m.style.display !== 'flex') return;
+          // 입력 자동 포커스는 모바일 키보드를 띄울 수 있어, 내부 포커스가 없을 때만 컨테이너로 이동
+          if (!m.contains(document.activeElement)) m.focus();
+        }, 40);
+      } else if (!open && m.dataset.a11yOpen) {
+        delete m.dataset.a11yOpen;
+        setTimeout(() => {
+          if (!getOpenModals().length && _lastNonModalFocus && _lastNonModalFocus.focus) _lastNonModalFocus.focus();
+        }, 0);
+      }
+    }
+  });
+  document.querySelectorAll('.modal-overlay').forEach(m => mo.observe(m, { attributes: true, attributeFilter: ['style'] }));
+  // 4) Escape = 최상단 모달 닫기, Tab = 모달 내부에 포커스 가두기(포커스 트랩)
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' && e.key !== 'Tab') return;
+    const m = getTopModal();
+    if (!m) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeModalEl(m); return; }
+    // Tab 트랩
+    const sel = 'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const focusable = [...m.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+    if (!focusable.length) { e.preventDefault(); m.focus(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
 }
 
 // ════════ 네비게이션 ════════
@@ -3736,6 +3813,7 @@ function applyTheme() {
 (function init() {
   applyTheme();
   loadAll();
+  setupModalA11y();          // 모달 Escape 닫기·포커스 트랩·복귀 설정
   recomputeTaskDates();      // 저장된 dlv/dl/urg를 오늘 기준으로 다시 계산 (세션 간 노후화 방지)
   _todayStr = todayISO();
   scheduleMidnightRollover(); // 자정 넘어가면 자동 갱신
