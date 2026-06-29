@@ -5,6 +5,12 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.14.0 (2026-06-25)
+    - 보안: 사용자 입력값을 화면에 표시하기 전 escape 처리하는 escapeHtml() 헬퍼 추가 — 저장형 XSS 방지 (약 25곳 적용)
+    - 안정성: localStorage 데이터 손상으로 JSON 파싱 실패 시에도 앱이 멈추지 않고 빈 상태로 안전하게 시작
+    - 백업 불러오기(importData) 시 tasks/wikiItems/trashBin 형식과 필드 타입을 검증해 잘못된 파일로 인한 오류 방지
+    - 이미 삭제된 태스크 대상 모달 저장·하위 태스크 조작·날짜·요청자 수정 시 크래시 방지 (null 가드 추가)
+    - 매월 반복 태스크 기준일이 31일처럼 다음 달에 없는 날짜일 때 한 달을 건너뛰던 문제 수정 (다음 달 말일로 보정)
   v2.13.0 (2026-06-25)
     - 백업 자동화: 마지막 백업 시점 추적 + 권장 주기(기본 7일) 초과 시 대시보드 배너·토스트 안내
     - 자동 백업 옵션(켜면 주기 경과 후 앱 열 때 .json 자동 내려받기) + 주기 설정 변경
@@ -64,7 +70,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.13.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.14.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -1127,11 +1133,18 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.13.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.14.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.14.0", date: "2026-06-25", title: "보안·안정성 강화", items: [
+    "사용자 입력값(제목·메모·태그 등)을 화면에 표시할 때 이스케이프 처리해 저장형 XSS 방지",
+    "저장된 데이터가 손상되어도 안전하게 빈 상태로 시작 (앱이 멈추지 않도록)",
+    "백업 파일 불러오기 시 형식을 검증해 잘못된 파일로 인한 오류 방지",
+    "이미 삭제된 태스크를 다시 열거나 수정할 때 발생하던 오류 수정",
+    "매월 반복 태스크가 31일에 생성되면 다음 달로 건너뛰던 문제 수정 (말일로 보정)",
+  ]},
   { version: "2.13.0", date: "2026-06-25", title: "백업 자동화 & 자정 자동 갱신", items: [
     "마지막 백업 시점을 추적해, 권장 주기(기본 7일)가 지나면 대시보드에서 백업을 안내",
     "자동 백업 옵션 — 켜두면 주기가 지났을 때 앱을 열 때 .json을 자동으로 내려받아요",
@@ -1317,7 +1330,13 @@ function loadAll() {
     || localStorage.getItem('taskin_data_v3')
     || localStorage.getItem('taskin_data_v2')
     || localStorage.getItem('taskin_data') || '{}';
-  const data = JSON.parse(raw);
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    showToast('⚠️ 저장된 데이터를 읽지 못했어요. 손상되었을 수 있어 빈 상태로 시작합니다.<br>백업 파일이 있다면 다시 불러와주세요.', 'red', 6000);
+    data = {};
+  }
   tasks = data.tasks || [];
   wikiItems = data.wikiItems || [];
   trashBin = data.trashBin || [];
@@ -1372,6 +1391,10 @@ function parseTags(str) {
 }
 function stringifyTags(arr) {
   return (arr||[]).map(t => `#${t}`).join(' ');
+}
+// innerHTML에 사용자 입력값을 꽂아넣기 전 escape (저장형 XSS 방지)
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 function dlvFromDate(s) { if (!s) return 99; return Math.round((new Date(s) - TODAY) / 86400000); }
 function formatDl(s) {
@@ -1596,7 +1619,7 @@ function renderBoard() {
           ${items.map(t => {
             const eiHtml    = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 6px;">${EI_LABELS[t.ei]}</span>` : '';
             const staleHtml = isStale(t) ? `<span class="badge" style="font-size:10px;padding:2px 6px;background:var(--red-bg);color:var(--red);" title="${daysSince(t.stChangedAt)}일째 ${STATUS_LABEL[t.st]} 상태에서 멈춰있어요">🐢 ${daysSince(t.stChangedAt)}일째</span>` : '';
-            const tagsHtml = (t.tags||[]).slice(0,2).map(tag => `<span class="task-tag" style="margin-left:0;font-size:10px;">#${tag}</span>`).join('');
+            const tagsHtml = (t.tags||[]).slice(0,2).map(tag => `<span class="task-tag" style="margin-left:0;font-size:10px;">#${escapeHtml(tag)}</span>`).join('');
             return `
               <div class="kanban-card"
                 draggable="true"
@@ -1609,7 +1632,7 @@ function renderBoard() {
                 onclick="openModal(${t.id})">
                 <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
                   <div class="subtask-cb ${t.st==='done'?'done':''}" style="margin-top:2px;flex-shrink:0;" onclick="event.stopPropagation();toggleDone(${t.id})">${t.st==='done'?checkIcon:''}</div>
-                  <div class="kanban-card-title ${t.st==='done'?'strike':''}">${t.title}</div>
+                  <div class="kanban-card-title ${t.st==='done'?'strike':''}">${escapeHtml(t.title)}</div>
                 </div>
                 <div class="kanban-card-meta">
                   <span class="badge badge-${t.urg}" style="font-size:10px;padding:2px 7px;">${t.dl}</span>
@@ -1618,7 +1641,7 @@ function renderBoard() {
                   ${staleHtml}
                   ${tagsHtml}
                 </div>
-                ${t.req ? `<div style="font-size:11px;color:var(--t3);font-weight:600;margin-top:8px;">👤 ${t.req}</div>` : ''}
+                ${t.req ? `<div style="font-size:11px;color:var(--t3);font-weight:600;margin-top:8px;">👤 ${escapeHtml(t.req)}</div>` : ''}
                 ${t.subtasks&&t.subtasks.length ? `<div style="margin-top:10px;"><div class="subtask-progress"><div class="subtask-progress-bar" style="width:${Math.round(t.subtasks.filter(s=>s.done).length/t.subtasks.length*100)}%"></div></div><div style="font-size:10px;color:var(--t3);font-weight:600;margin-top:3px;">${t.subtasks.filter(s=>s.done).length}/${t.subtasks.length} 완료</div></div>` : ''}
               </div>
             `;
@@ -1787,13 +1810,13 @@ function renderList() {
     tbody.appendChild(gr);
     groups[g].forEach(t => {
       const tr = document.createElement('tr'); tr.className = 'data-row';
-      const tagsHTML = (t.tags||[]).length ? `<div class="tags-wrap">${t.tags.map(tag=>`<span class="task-tag">#${tag}</span>`).join('')}</div>` : '';
+      const tagsHTML = (t.tags||[]).length ? `<div class="tags-wrap">${t.tags.map(tag=>`<span class="task-tag">#${escapeHtml(tag)}</span>`).join('')}</div>` : '';
       const eiHTML   = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 7px;">${EI_LABELS[t.ei]}</span>` : `<span style="color:var(--border2);font-size:12px;font-weight:600;">—</span>`;
       tr.innerHTML = `
         <td style="text-align:center;"><div class="cb ${t.st==='done'?'done':''}" onclick="event.stopPropagation();toggleDone(${t.id})">${t.st==='done'?checkIcon:''}</div></td>
-        <td onclick="openModal(${t.id})" title="${t.title}">
+        <td onclick="openModal(${t.id})" title="${escapeHtml(t.title)}">
           <div class="title-wrap">
-            <div class="title-text ${t.st==='done'?'strike':''}">${t.title}</div>
+            <div class="title-text ${t.st==='done'?'strike':''}">${escapeHtml(t.title)}</div>
             ${tagsHTML}
           </div>
         </td>
@@ -1815,7 +1838,7 @@ function renderList() {
           </div>
         </td>
         <td style="color:var(--t1);font-size:13px;font-weight:600;" onclick="event.stopPropagation();">
-          <span style="cursor:pointer;display:inline-block;padding:6px 10px;border-radius:8px;transition:all 0.2s;border:1px solid transparent;" onmouseover="this.style.background='var(--surface2)';this.style.borderColor='var(--border2)';" onmouseout="this.style.background='transparent';this.style.borderColor='transparent';" onclick="updateTaskReqPrompt(${t.id})">${t.req?t.req:'<span style="color:var(--t3);font-weight:500;">+ 추가</span>'}</span>
+          <span style="cursor:pointer;display:inline-block;padding:6px 10px;border-radius:8px;transition:all 0.2s;border:1px solid transparent;" onmouseover="this.style.background='var(--surface2)';this.style.borderColor='var(--border2)';" onmouseout="this.style.background='transparent';this.style.borderColor='transparent';" onclick="updateTaskReqPrompt(${t.id})">${t.req?escapeHtml(t.req):'<span style="color:var(--t3);font-weight:500;">+ 추가</span>'}</span>
         </td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <span class="badge badge-${t.cat}" style="cursor:pointer;transition:all 0.2s;box-shadow:var(--shadow-sm);" onclick="toggleTaskCat(${t.id})">${t.cat==='work'?'💼 업무':'🏠 개인'}</span>
@@ -1877,7 +1900,7 @@ function renderDashboard() {
       ? `<div style="margin-bottom:${staleTasks.length?'10px':'0'};">⚡ <b>진행중인 일이 ${doingCount}개</b>로 제한(${wipLimit}개)을 넘었어요. <span style="text-decoration:underline;cursor:pointer;" onclick="showPage('list',document.querySelectorAll('.nav-item')[1]);setView('board');" title="칸반 보드로 이동">새로 시작하기 전에 먼저 끝내보세요</span>.</div>`
       : '';
     const staleLine = staleTasks.length
-      ? `<div>🐢 <b>${staleTasks.length}개</b>가 ${STALE_DAYS}일 이상 멈춰있어요 — ${staleTasks.slice(0,3).map(t=>`<span style="text-decoration:underline;cursor:pointer;" onclick="openModal(${t.id})">${t.title.length>14?t.title.slice(0,14)+'…':t.title}</span>`).join(', ')}${staleTasks.length>3?` 외 ${staleTasks.length-3}건`:''}</div>`
+      ? `<div>🐢 <b>${staleTasks.length}개</b>가 ${STALE_DAYS}일 이상 멈춰있어요 — ${staleTasks.slice(0,3).map(t=>`<span style="text-decoration:underline;cursor:pointer;" onclick="openModal(${t.id})">${escapeHtml(t.title.length>14?t.title.slice(0,14)+'…':t.title)}</span>`).join(', ')}${staleTasks.length>3?` 외 ${staleTasks.length-3}건`:''}</div>`
       : '';
     banner.innerHTML = `<div class="card" style="margin-bottom:16px;border-color:var(--amb);background:var(--amb-bg);color:var(--t1);font-size:13px;font-weight:600;line-height:1.7;">${wipLine}${staleLine}</div>`;
   } else {
@@ -1890,7 +1913,7 @@ function renderDashboard() {
   tl.innerHTML = upcoming.map(t => `
     <div class="tl-item">
       <div class="tl-dot" style="background:var(--${t.urg==='urgent'?'red':t.urg==='warn'?'amb':'t3'})"></div>
-      <div class="tl-title" onclick="openModal(${t.id})" title="${t.title}">${t.title}</div>
+      <div class="tl-title" onclick="openModal(${t.id})" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</div>
       <span class="badge badge-${t.urg}">${t.dl}</span>
     </div>
   `).join('') || '<div style="font-size:14px;font-weight:500;color:var(--t3);padding:16px;text-align:center;">임박한 할 일이 없습니다. 🎉</div>';
@@ -1945,11 +1968,11 @@ function renderDashboard() {
   } else {
     let tagHtml = sortedTags.map(tag => {
       const pts = tagPts[tag]; const pct = Math.round(pts/totalTagPts*100);
-      return `<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:3px;"><span>${tag==='태그없음'?'기타':`#${tag}`}</span><span style="color:var(--acc);">${pts}pt</span></div><div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--acc),var(--pur));border-radius:3px;"></div></div></div>`;
+      return `<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:3px;"><span>${tag==='태그없음'?'기타':`#${escapeHtml(tag)}`}</span><span style="color:var(--acc);">${pts}pt</span></div><div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--acc),var(--pur));border-radius:3px;"></div></div></div>`;
     }).join('');
     let reqHtml = sortedReqs.map(([r,c]) => `
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;padding:4px 0;border-bottom:1px solid var(--border);">
-        <span style="color:var(--t2);">👤 ${r}</span>
+        <span style="color:var(--t2);">👤 ${escapeHtml(r)}</span>
         <span style="color:var(--t3);">${c}건</span>
       </div>`).join('');
     perfEl.innerHTML = `
@@ -1999,12 +2022,12 @@ function addTask() {
   saveAll(); renderCurrentView(); renderDashboard();
   // ① 마감일 있으면 캘린더 이동 토스트
   if (date) {
-    showToast(`📅 "${title.length>15?title.slice(0,15)+'…':title}" 등록됨 — <span style="text-decoration:underline;cursor:pointer;" onclick="goToCalendarDate('${date}')">캘린더에서 보기</span>`, 'acc', 4000);
+    showToast(`📅 "${escapeHtml(title.length>15?title.slice(0,15)+'…':title)}" 등록됨 — <span style="text-decoration:underline;cursor:pointer;" onclick="goToCalendarDate('${date}')">캘린더에서 보기</span>`, 'acc', 4000);
   }
 }
 
 function toggleDone(id) {
-  const t = tasks.find(x => x.id === id);
+  const t = tasks.find(x => x.id === id); if (!t) return;
   const wasNotDone = t.st !== 'done';
   t.st = t.st === 'done' ? 'todo' : 'done';
   t.history.push({ text: t.st==='done'?'✅ 완료 처리':'🔄 완료 취소', time: getCurrentDateTime() });
@@ -2025,7 +2048,11 @@ function spawnNextRecurrence(t) {
   if (t.repeat === 'daily')    next.setDate(base.getDate()+1);
   if (t.repeat === 'weekly')   next.setDate(base.getDate()+7);
   if (t.repeat === 'biweekly') next.setDate(base.getDate()+14);
-  if (t.repeat === 'monthly')  next.setMonth(base.getMonth()+1);
+  if (t.repeat === 'monthly') {
+    next.setMonth(base.getMonth()+1, 1); // 일단 1일로 고정해 자동 보정으로 인한 월 건너뜀 방지
+    const lastDayOfNextMonth = new Date(next.getFullYear(), next.getMonth()+1, 0).getDate();
+    next.setDate(Math.min(base.getDate(), lastDayOfNextMonth));
+  }
   const nextDate = next.toISOString().split('T')[0];
   const newTask = {
     id:nextId++, title:t.title, tags:[...(t.tags||[])], points:t.points||1, retro:'',
@@ -2036,7 +2063,7 @@ function spawnNextRecurrence(t) {
     ei:t.ei||null, repeat:t.repeat, stChangedAt:todayISO()
   };
   tasks.push(newTask);
-  showToast(`🔁 반복 태스크 "${t.title.length>12?t.title.slice(0,12)+'…':t.title}" 다음 주기(${formatDl(nextDate)})가 생성되었습니다.`, 'acc', 4000);
+  showToast(`🔁 반복 태스크 "${escapeHtml(t.title.length>12?t.title.slice(0,12)+'…':t.title)}" 다음 주기(${formatDl(nextDate)})가 생성되었습니다.`, 'acc', 4000);
 }
 
 function updateModalRepeat(val) {
@@ -2046,12 +2073,13 @@ function updateModalRepeat(val) {
   saveAll(); renderCurrentView();
 }
 function updateTaskPoints(id, val) {
-  const t = tasks.find(x => x.id === id); t.points = Number(val);
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  t.points = Number(val);
   t.history.push({ text:`📊 기여도 업데이트: ${val}pt`, time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); renderDashboard();
 }
 function updateTaskDate(id, v) {
-  const t = tasks.find(x => x.id === id);
+  const t = tasks.find(x => x.id === id); if (!t) return;
   t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
   t.history.push({ text:'🗓 마감일 수정됨', time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); renderDashboard();
@@ -2110,6 +2138,7 @@ function setEiPriority(q) {
 function openModal(id) {
   closeAllModals(); currentTaskId = id;
   const t = tasks.find(x => x.id === id);
+  if (!t) { currentTaskId = null; showToast('해당 태스크를 찾을 수 없어요 — 이미 삭제되었을 수 있어요.', 'amb'); renderCurrentView(); return; }
   const titleEl = document.getElementById('modal-title');
   titleEl.value = t.title;
   setTimeout(()=>{ titleEl.style.height='auto'; titleEl.style.height=titleEl.scrollHeight+'px'; },10);
@@ -2159,7 +2188,7 @@ function openModal(id) {
   const hl = document.getElementById('hist-list'); hl.innerHTML = '';
   if (!t.history?.length) { hl.innerHTML = '기록이 없습니다.'; }
   (t.history||[]).slice(-5).reverse().forEach(h => {
-    hl.innerHTML += `<div style="display:flex;gap:12px;margin-bottom:12px;"><span style="color:var(--acc);font-weight:800;">[${h.time}]</span><span style="color:var(--t1);font-weight:600;">${h.text}</span></div>`;
+    hl.innerHTML += `<div style="display:flex;gap:12px;margin-bottom:12px;"><span style="color:var(--acc);font-weight:800;">[${escapeHtml(h.time)}]</span><span style="color:var(--t1);font-weight:600;">${escapeHtml(h.text)}</span></div>`;
   });
 
   const m = document.getElementById('modal-overlay'); m.style.display='flex'; setTimeout(()=>m.classList.add('open'),10);
@@ -2171,17 +2200,21 @@ function toggleModalCat()     { if (currentTaskId) { toggleTaskCat(currentTaskId
 function cycleModalStatus()   { if (currentTaskId) { cycleTaskStatus(currentTaskId); openModal(currentTaskId); } }
 function updateModalDate(v) {
   const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
   t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
   t.history.push({ text:'🗓 마감일 업데이트', time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); openModal(currentTaskId);
 }
 function updateModalReq(v) {
-  const t = tasks.find(x => x.id === currentTaskId); t.req = v.trim();
+  const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
+  t.req = v.trim();
   t.history.push({ text:`👤 요청자 업데이트: ${v.trim()||'없음'}`, time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); openModal(currentTaskId);
 }
 function saveModal() {
   const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
   const newTitle  = document.getElementById('modal-title').value.trim() || '제목 없음';
   const newMemo   = document.getElementById('modal-memo').value;
   const newRetro  = document.getElementById('modal-retro').value;
@@ -2267,7 +2300,7 @@ function showOrganizePreview(data) {
   const m = document.getElementById('organize-modal-overlay');
   const subList = (data.subtasks||[]).map((s,i)=>`
     <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;">
-      <input type="checkbox" checked data-sub="${i}" style="width:16px;height:16px;accent-color:var(--acc);"> ${s}
+      <input type="checkbox" checked data-sub="${i}" style="width:16px;height:16px;accent-color:var(--acc);"> ${escapeHtml(s)}
     </label>`).join('');
 
   document.getElementById('organize-preview').innerHTML = `
@@ -2276,7 +2309,7 @@ function showOrganizePreview(data) {
         <label class="sec-label" style="margin-bottom:0;">📝 정리된 상세 내용</label>
         <label style="font-size:12px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="org-apply-summary" checked style="accent-color:var(--acc);"> 적용</label>
       </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:14px;line-height:1.7;white-space:pre-wrap;max-height:180px;overflow-y:auto;">${data.summary||'(정리 내용 없음)'}</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:14px;line-height:1.7;white-space:pre-wrap;max-height:180px;overflow-y:auto;">${data.summary?escapeHtml(data.summary):'(정리 내용 없음)'}</div>
     </div>
     ${data.subtasks?.length ? `
     <div style="margin-bottom:20px;">
@@ -2292,12 +2325,12 @@ function showOrganizePreview(data) {
         <label class="sec-label" style="margin-bottom:0;color:var(--acc);">🏆 회고 초안</label>
         <label style="font-size:12px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="org-apply-retro" checked style="accent-color:var(--acc);"> 적용</label>
       </div>
-      <div style="background:var(--acc-bg);border:1px solid rgba(79,70,229,0.2);border-radius:12px;padding:16px;font-size:14px;line-height:1.7;white-space:pre-wrap;">${data.retro}</div>
+      <div style="background:var(--acc-bg);border:1px solid rgba(79,70,229,0.2);border-radius:12px;padding:16px;font-size:14px;line-height:1.7;white-space:pre-wrap;">${escapeHtml(data.retro)}</div>
     </div>` : ''}
     ${data.suggestedTitle && data.suggestedTitle !== document.getElementById('modal-title').value.trim() ? `
     <div style="margin-top:16px;padding:12px 16px;background:var(--surface2);border-radius:12px;display:flex;align-items:center;gap:10px;">
       <label style="font-size:12px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;"><input type="checkbox" id="org-apply-title" style="accent-color:var(--acc);"> 제목 변경</label>
-      <span style="font-size:13px;font-weight:700;color:var(--t1);">→ ${data.suggestedTitle}</span>
+      <span style="font-size:13px;font-weight:700;color:var(--t1);">→ ${escapeHtml(data.suggestedTitle)}</span>
     </div>` : ''}
   `;
   m.style.display='flex'; setTimeout(()=>m.classList.add('open'),10);
@@ -2380,7 +2413,7 @@ function renderSubtasks(t) {
   container.innerHTML = subs.map((s,i) => `
     <div class="subtask-item">
       <div class="subtask-cb ${s.done?'done':''}" onclick="toggleSubtask(${i})">${s.done?checkIcon:''}</div>
-      <span class="subtask-text ${s.done?'done':''}">${s.text}</span>
+      <span class="subtask-text ${s.done?'done':''}">${escapeHtml(s.text)}</span>
       <button onclick="removeSubtask(${i})" style="background:transparent;border:none;cursor:pointer;color:var(--border2);padding:4px;border-radius:6px;transition:all 0.2s;font-size:14px;" onmouseover="this.style.color='var(--red)';" onmouseout="this.style.color='var(--border2)';">✕</button>
     </div>
   `).join('');
@@ -2389,12 +2422,14 @@ function addSubtask() {
   const text = prompt('하위 태스크 내용을 입력하세요:');
   if (!text?.trim()) return;
   const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
   t.subtasks.push({ text:text.trim(), done:false });
   t.history.push({ text:`☑️ 하위 태스크 추가: ${text.trim()}`, time:getCurrentDateTime() });
   saveAll(); renderSubtasks(t);
 }
 function toggleSubtask(idx) {
   const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
   t.subtasks[idx].done = !t.subtasks[idx].done;
   // ③ 하위 태스크 전체 완료 → 부모 자동 완료
   if (t.subtasks.length > 0 && t.subtasks.every(s => s.done) && t.st !== 'done') {
@@ -2409,6 +2444,7 @@ function toggleSubtask(idx) {
 }
 function removeSubtask(idx) {
   const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
   t.subtasks.splice(idx,1);
   saveAll(); renderSubtasks(t);
 }
@@ -2495,7 +2531,7 @@ function updateReportSummary() {
   const el = document.getElementById('report-task-summary');
   if (!tks.length) { el.innerHTML='<span style="color:var(--t3);">해당 기간에 완료된 태스크가 없습니다.</span>'; return; }
   const totalPts = tks.reduce((a,c)=>a+(c.points||1),0);
-  el.innerHTML = `<b style="color:var(--t1);">${tks.length}개 완료</b> · 총 <b style="color:var(--acc);">${totalPts}pt</b> · 주요 태스크: ${tks.slice(0,3).map(t=>`<span style="color:var(--t2);">${t.title}</span>`).join(', ')}${tks.length>3?` 외 ${tks.length-3}건`:''}`;
+  el.innerHTML = `<b style="color:var(--t1);">${tks.length}개 완료</b> · 총 <b style="color:var(--acc);">${totalPts}pt</b> · 주요 태스크: ${tks.slice(0,3).map(t=>`<span style="color:var(--t2);">${escapeHtml(t.title)}</span>`).join(', ')}${tks.length>3?` 외 ${tks.length-3}건`:''}`;
 }
 function openReportModal() {
   closeAllModals();
@@ -2756,9 +2792,9 @@ function renderKaiPreview() {
       <div class="kai-select-badge" id="kai-badge-${i}">${item.selected ? checkSvg : ''}</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-right:32px;">
         <span style="font-size:12px;font-weight:700;color:var(--acc);background:var(--acc-bg);padding:4px 10px;border-radius:7px;white-space:nowrap;">${catMap[item.category] || '📝 일반 메모'}</span>
-        <span style="font-size:16px;font-weight:800;color:var(--t1);">${item.title}</span>
+        <span style="font-size:16px;font-weight:800;color:var(--t1);">${escapeHtml(item.title)}</span>
       </div>
-      <div style="font-size:13px;color:var(--t2);line-height:1.7;white-space:pre-wrap;max-height:120px;overflow:hidden;mask-image:linear-gradient(to bottom, black 60%, transparent 100%);">${item.content}</div>
+      <div style="font-size:13px;color:var(--t2);line-height:1.7;white-space:pre-wrap;max-height:120px;overflow:hidden;mask-image:linear-gradient(to bottom, black 60%, transparent 100%);">${escapeHtml(item.content)}</div>
     </div>
   `).join('');
 
@@ -2951,7 +2987,7 @@ function renderCalendar() {
     });
     sorted.slice(0, MAX_PILLS).forEach(t => {
       const pc = pillClass(t);
-      pillsHtml += `<span class="cal-pill ${pc}" onclick="event.stopPropagation();openModal(${t.id})" title="${t.title}">${t.st==='done'?'✓ ':''}`+t.title+`</span>`;
+      pillsHtml += `<span class="cal-pill ${pc}" onclick="event.stopPropagation();openModal(${t.id})" title="${escapeHtml(t.title)}">${t.st==='done'?'✓ ':''}`+escapeHtml(t.title)+`</span>`;
     });
     if (sorted.length > MAX_PILLS) {
       pillsHtml += `<span class="cal-more" onclick="event.stopPropagation();selectCalDay('${dateStr}')">+${sorted.length - MAX_PILLS}개 더보기</span>`;
@@ -3011,17 +3047,17 @@ function renderDayDetail(dateStr) {
           : pc === 'cal-pill-done' ? 'var(--grn)'
           : 'var(--acc)';
         const eiHtml = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 7px;">${EI_LABELS[t.ei]}</span>` : '';
-        const tagsHtml = (t.tags||[]).slice(0,3).map(tag=>`<span class="task-tag">#${tag}</span>`).join('');
+        const tagsHtml = (t.tags||[]).slice(0,3).map(tag=>`<span class="task-tag">#${escapeHtml(tag)}</span>`).join('');
         return `
           <div class="cal-detail-card" onclick="openModal(${t.id})">
             <div style="width:4px;height:36px;border-radius:2px;background:${pcColor};flex-shrink:0;"></div>
             <div style="flex:1;min-width:0;">
-              <div style="font-size:15px;font-weight:700;color:${t.st==='done'?'var(--t3)':'var(--t1)'};${t.st==='done'?'text-decoration:line-through;':''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${t.title}</div>
+              <div style="font-size:15px;font-weight:700;color:${t.st==='done'?'var(--t3)':'var(--t1)'};${t.st==='done'?'text-decoration:line-through;':''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.title)}</div>
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;align-items:center;">
                 <span class="badge badge-${t.urg}" style="font-size:10px;">${STATUS_LABEL[t.st]}</span>
                 <span style="font-size:11px;font-weight:700;color:var(--pur);background:var(--pur-bg);border-radius:6px;padding:2px 6px;">${t.points}pt</span>
                 ${eiHtml}${tagsHtml}
-                ${t.req ? `<span style="font-size:11px;color:var(--t3);font-weight:600;">👤 ${t.req}</span>` : ''}
+                ${t.req ? `<span style="font-size:11px;color:var(--t3);font-weight:600;">👤 ${escapeHtml(t.req)}</span>` : ''}
               </div>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--border2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -3106,7 +3142,7 @@ function renderNotif() {
     return `
       <div class="notif-card" style="border-left:4px solid ${color};">
         <div style="flex:1;min-width:0;">
-          <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${t.title}</div>
+          <div style="font-weight:800;font-size:16px;margin-bottom:6px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.title)}</div>
           <div style="font-size:13px;font-weight:600;color:var(--t2);">${msg}</div>
         </div>
         <button class="btn btn-ghost" style="font-size:13px;border-radius:10px;flex-shrink:0;" onclick="openModal(${t.id})">상세보기</button>
@@ -3135,7 +3171,7 @@ function renderTrash() {
   const c = document.getElementById('trash-list');
   c.innerHTML = trashBin.map((t,i)=>`
     <div class="card" style="display:flex;justify-content:space-between;align-items:center;border-radius:16px;">
-      <div><div style="font-weight:800;font-size:16px;color:var(--t1);">${t.task.title}</div><div style="font-size:13px;font-weight:600;color:var(--t3);margin-top:6px;">${t.deletedAt} 삭제됨</div></div>
+      <div><div style="font-weight:800;font-size:16px;color:var(--t1);">${escapeHtml(t.task.title)}</div><div style="font-size:13px;font-weight:600;color:var(--t3);margin-top:6px;">${escapeHtml(t.deletedAt)} 삭제됨</div></div>
       <button class="btn btn-ghost" style="border-radius:10px;font-weight:700;" onclick="restore(${i})">복구하기</button>
     </div>`).join('') || '<div class="card" style="text-align:center;padding:80px 20px;font-size:15px;font-weight:600;color:var(--t3);border-radius:20px;border:1px dashed var(--border2);background:transparent;box-shadow:none;">휴지통이 깨끗하게 비어있습니다. ✨</div>';
 }
@@ -3156,7 +3192,7 @@ function showUndoToast(title) {
     document.body.appendChild(toast);
   }
   const short = title.length > 15 ? title.slice(0,15)+'…' : title;
-  toast.innerHTML = `<span style="color:rgba(255,255,255,.9);flex:1;">"${short}" 항목 삭제됨</span><button onclick="undoLastDelete()" style="background:var(--acc);border:none;color:#fff;border-radius:10px;padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;">되돌리기</button><button onclick="showPage('trash',document.querySelectorAll('.nav-item')[6]);hideUndoToast();" style="background:transparent;border:none;color:rgba(255,255,255,.5);font-size:13px;cursor:pointer;font-family:inherit;padding:0 4px;flex-shrink:0;font-weight:600;">휴지통</button><div id="undo-progress" style="position:absolute;bottom:0;left:0;height:4px;background:rgba(255,255,255,.2);width:100%;transition:width 4s linear;"></div>`;
+  toast.innerHTML = `<span style="color:rgba(255,255,255,.9);flex:1;">"${escapeHtml(short)}" 항목 삭제됨</span><button onclick="undoLastDelete()" style="background:var(--acc);border:none;color:#fff;border-radius:10px;padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;">되돌리기</button><button onclick="showPage('trash',document.querySelectorAll('.nav-item')[6]);hideUndoToast();" style="background:transparent;border:none;color:rgba(255,255,255,.5);font-size:13px;cursor:pointer;font-family:inherit;padding:0 4px;flex-shrink:0;font-weight:600;">휴지통</button><div id="undo-progress" style="position:absolute;bottom:0;left:0;height:4px;background:rgba(255,255,255,.2);width:100%;transition:width 4s linear;"></div>`;
   toast.style.display='flex'; void toast.offsetWidth; toast.style.opacity='1';
   clearTimeout(window._deleteTimer); setTimeout(()=>{ const p=document.getElementById('undo-progress'); if(p) p.style.width='0%'; },50);
   window._deleteTimer = setTimeout(hideUndoToast, 4000);
@@ -3266,9 +3302,9 @@ function renderFolderModalList() {
     <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;border-bottom:1px solid var(--border);${i===pendingFolderTasks.length-1?'border-bottom:none;':''}">
       <input type="checkbox" ${t.selected?'checked':''} onchange="pendingFolderTasks[${i}].selected=this.checked" style="margin-top:4px;transform:scale(1.3);cursor:pointer;accent-color:var(--acc);"/>
       <div style="flex:1;">
-        <div style="font-weight:800;color:var(--t1);font-size:15px;margin-bottom:6px;">📁 ${t.title}</div>
-        <div style="font-size:12px;font-weight:600;color:var(--acc);background:var(--acc-bg);padding:5px 10px;border-radius:7px;margin-bottom:6px;font-family:monospace;">${pathHint}</div>
-        <div style="font-size:13px;font-weight:500;color:var(--t3);">인식된 문서: ${t.files.length}개<br><span style="color:var(--t2);">(${t.files.slice(0,3).join(', ')}${t.files.length>3?' 외...':''})</span></div>
+        <div style="font-weight:800;color:var(--t1);font-size:15px;margin-bottom:6px;">📁 ${escapeHtml(t.title)}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--acc);background:var(--acc-bg);padding:5px 10px;border-radius:7px;margin-bottom:6px;font-family:monospace;">${escapeHtml(pathHint)}</div>
+        <div style="font-size:13px;font-weight:500;color:var(--t3);">인식된 문서: ${t.files.length}개<br><span style="color:var(--t2);">(${escapeHtml(t.files.slice(0,3).join(', '))}${t.files.length>3?' 외...':''})</span></div>
       </div>
     </div>`;
   }).join('');
@@ -3334,7 +3370,7 @@ function renderWikiList() {
   const catMap={budget:'💰 예산 / 비용',kpi:'📈 성과지표',process:'⚙️ 업무 프로세스',contacts:'📞 연락처 / 협력사',general:'📝 일반 메모'};
   document.getElementById('wiki-list').innerHTML=filtered.map(item=>{
     const plain=item.content.replace(/!\[.*?\]\(.*?\)/g,'[이미지]').replace(/[#*`~>|_-]/g,' ').substring(0,120);
-    return `<div class="wiki-card" onclick="openWikiModal(${item.id})"><span class="wiki-tag">${catMap[item.category]||'기타'}</span><div class="wiki-title">${item.title}</div><div class="wiki-content">${plain}...</div><div style="margin-top:20px;font-size:12px;font-weight:600;color:var(--t3);">업데이트: ${item.updatedAt.split(' ')[0]}</div></div>`;
+    return `<div class="wiki-card" onclick="openWikiModal(${item.id})"><span class="wiki-tag">${catMap[item.category]||'기타'}</span><div class="wiki-title">${escapeHtml(item.title)}</div><div class="wiki-content">${escapeHtml(plain)}...</div><div style="margin-top:20px;font-size:12px;font-weight:600;color:var(--t3);">업데이트: ${item.updatedAt.split(' ')[0]}</div></div>`;
   }).join('');
 }
 
@@ -3479,7 +3515,11 @@ function importData(event) {
   reader.onload=e=>{
     try {
       const data=JSON.parse(e.target.result);
-      if(!data.tasks) throw new Error('올바른 백업 파일이 아닙니다.');
+      if(!data || typeof data !== 'object' || !Array.isArray(data.tasks)) throw new Error('올바른 백업 파일이 아닙니다.');
+      if(data.wikiItems !== undefined && !Array.isArray(data.wikiItems)) throw new Error('올바른 백업 파일이 아닙니다 (wikiItems 형식 오류).');
+      if(data.trashBin !== undefined && !Array.isArray(data.trashBin)) throw new Error('올바른 백업 파일이 아닙니다 (trashBin 형식 오류).');
+      const badTask = data.tasks.find(t => !t || typeof t !== 'object' || typeof t.id !== 'number' || typeof t.title !== 'string');
+      if (badTask) throw new Error('올바른 백업 파일이 아닙니다 (태스크 데이터 오류).');
       // 백업 버전 정보 안내
       const verInfo = data.appVersion
         ? `백업 버전: v${data.appVersion} (스키마 ${data.dataSchema||'?'})\n생성 시각: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : '알 수 없음'}\n\n`
