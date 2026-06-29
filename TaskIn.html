@@ -5,6 +5,12 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.14.1 (2026-06-29)
+    - 성능: 상세 모달에서 항목을 편집할수록 점점 느려지던 문제 개선
+    - 성능: 저장 시마다 localStorage 전체를 재스캔하던 저장공간 계산 비용 제거 (직렬화 문자열 길이로 추정)
+    - 성능: 잦은 편집을 350ms 단위로 모아서 저장(debounce) — 탭 종료·전환 시 즉시 flush로 유실 방지
+    - 성능: 태스크별 활동 기록(history) 상한(최근 100개) 적용으로 객체 비대화 방지 (표시는 최근 5개로 동일)
+
   v2.14.0 (2026-06-25)
     - 보안: 사용자 입력값을 화면에 표시하기 전 escape 처리하는 escapeHtml() 헬퍼 추가 — 저장형 XSS 방지 (약 25곳 적용)
     - 안정성: localStorage 데이터 손상으로 JSON 파싱 실패 시에도 앱이 멈추지 않고 빈 상태로 안전하게 시작
@@ -70,7 +76,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.14.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.14.1 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -1133,11 +1139,17 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.14.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.14.1";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.14.1", date: "2026-06-29", title: "성능 최적화", items: [
+    "상세 모달에서 항목을 편집할수록 점점 느려지던 문제 개선",
+    "저장할 때마다 저장공간 전체를 다시 스캔하던 비용 제거 (저장 횟수와 무관하게 빠르게)",
+    "잦은 편집을 모아서 한 번에 저장(debounce)하도록 변경 — 입력 반응성 향상",
+    "태스크별 활동 기록이 무한정 쌓이지 않도록 상한 적용 (화면 표시는 동일)",
+  ]},
   { version: "2.14.0", date: "2026-06-25", title: "보안·안정성 강화", items: [
     "사용자 입력값(제목·메모·태그 등)을 화면에 표시할 때 이스케이프 처리해 저장형 XSS 방지",
     "저장된 데이터가 손상되어도 안전하게 빈 상태로 시작 (앱이 멈추지 않도록)",
@@ -1231,22 +1243,40 @@ const PROC_TEMPLATES = [
 ];
 
 // ════════ 저장/불러오기 ════════
+// 저장은 잦게 호출되므로(필드 편집마다) 350ms 동안 모아서 한 번만 기록 — 입력 중 성능 저하 방지.
+// 메모리 상태는 호출부에서 즉시 갱신되므로 화면 렌더는 영향받지 않고, localStorage 쓰기만 지연·병합한다.
+let _saveTimer = null;
 function saveAll() {
+  if (_saveTimer) return;                 // 이미 예약돼 있으면 중복 예약하지 않음 (선행 스로틀)
+  _saveTimer = setTimeout(flushSave, 350);
+}
+function flushSave() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  // 활동 기록(history)이 무한정 커지지 않도록 상한 적용 — 화면에는 최근 5개만 표시되므로 100개면 충분.
+  // 길이 검사만 하고 초과한 태스크만 splice 하므로 평소엔 사실상 비용이 없다.
+  for (const t of tasks) {
+    if (t.history && t.history.length > 120) t.history.splice(0, t.history.length - 100);
+  }
+  let dataStr = null;
   try {
-    localStorage.setItem('taskin_data_v7', JSON.stringify({ tasks, wikiItems, nextId, trashBin, kanbanOrder }));
+    dataStr = JSON.stringify({ tasks, wikiItems, nextId, trashBin, kanbanOrder });
+    localStorage.setItem('taskin_data_v7', dataStr);
   } catch (e) {
     showToast('⚠️ 저장공간이 가득 차서 변경사항이 저장되지 않았어요!<br>지금 바로 백업(.json)을 내려받고, 휴지통을 비우거나 오래된 항목을 정리해주세요.', 'red', 6000);
   }
-  updateStorageMeter();
+  updateStorageMeter(dataStr);
 }
 
 // ════════ 저장공간 게이지 (v2.10.0) ════════
 const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024; // 보수적 기준선 (Safari 등 가장 낮은 한도 기준)
 let _storageWarnedLevel = 0; // 0=정상, 1=경고(70%), 2=위험(90%)
-function getStorageUsageBytes() {
+// 메인 데이터('taskin_data_v7')를 제외한 나머지 작은 키들의 합계 — 거의 변하지 않으므로 캐시한다.
+let _otherKeysBytes = null;
+function getOtherKeysBytes() {
   let total = 0;
   for (const key in localStorage) {
     if (!Object.prototype.hasOwnProperty.call(localStorage, key)) continue;
+    if (key === 'taskin_data_v7') continue;
     total += (key.length + (localStorage.getItem(key) || '').length) * 2; // UTF-16 약 2바이트/문자
   }
   return total;
@@ -1269,6 +1299,7 @@ function isBackupOverdue() {
 function isAutoBackupOn() { return localStorage.getItem('taskin_autobackup') === 'on'; }
 function recordBackup() {
   localStorage.setItem('taskin_last_backup', new Date().toISOString());
+  _otherKeysBytes = null;   // 기타 키(백업 시각 등)가 바뀌었으니 캐시 갱신
   updateStorageMeter();
   const bb = document.getElementById('backup-banner'); if (bb) renderDashboard();
 }
@@ -1289,10 +1320,13 @@ function changeBackupInterval() {
   renderDashboard();
 }
 
-function updateStorageMeter() {
+function updateStorageMeter(dataStr) {
   const meterEl = document.getElementById('storage-meter');
   if (!meterEl) return;
-  const used = getStorageUsageBytes();
+  if (_otherKeysBytes === null) _otherKeysBytes = getOtherKeysBytes();
+  // 매번 localStorage 전체를 재스캔하지 않고, 방금 직렬화한 데이터 문자열 길이 + 캐시된 기타 키 크기로 추정.
+  const dataLen = (dataStr != null) ? dataStr.length : (localStorage.getItem('taskin_data_v7') || '').length;
+  const used = ('taskin_data_v7'.length + dataLen) * 2 + _otherKeysBytes;
   const pct = Math.min(100, Math.round((used / STORAGE_QUOTA_BYTES) * 100));
   document.getElementById('storage-meter-fill').style.width = pct + '%';
   document.getElementById('storage-meter-pct').textContent = pct + '%';
@@ -2185,11 +2219,11 @@ function openModal(id) {
   renderSubtasks(t);
 
   // 활동 기록
-  const hl = document.getElementById('hist-list'); hl.innerHTML = '';
-  if (!t.history?.length) { hl.innerHTML = '기록이 없습니다.'; }
-  (t.history||[]).slice(-5).reverse().forEach(h => {
-    hl.innerHTML += `<div style="display:flex;gap:12px;margin-bottom:12px;"><span style="color:var(--acc);font-weight:800;">[${escapeHtml(h.time)}]</span><span style="color:var(--t1);font-weight:600;">${escapeHtml(h.text)}</span></div>`;
-  });
+  const hl = document.getElementById('hist-list');
+  const hist = (t.history || []).slice(-5).reverse();
+  hl.innerHTML = hist.length
+    ? hist.map(h => `<div style="display:flex;gap:12px;margin-bottom:12px;"><span style="color:var(--acc);font-weight:800;">[${escapeHtml(h.time)}]</span><span style="color:var(--t1);font-weight:600;">${escapeHtml(h.text)}</span></div>`).join('')
+    : '기록이 없습니다.';
 
   const m = document.getElementById('modal-overlay'); m.style.display='flex'; setTimeout(()=>m.classList.add('open'),10);
 }
@@ -3596,8 +3630,13 @@ function applyTheme() {
   recomputeTaskDates();      // 저장된 dlv/dl/urg를 오늘 기준으로 다시 계산 (세션 간 노후화 방지)
   _todayStr = todayISO();
   scheduleMidnightRollover(); // 자정 넘어가면 자동 갱신
-  // 탭을 다시 보면 날짜 변경 여부 확인 후 갱신
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateContext(false); });
+  // 탭을 다시 보면 날짜 변경 여부 확인 후 갱신 / 탭이 가려지면 보류 중인 저장을 즉시 기록
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) flushSave();
+    else refreshDateContext(false);
+  });
+  // 페이지를 떠나기 전 보류 중인 저장을 반드시 기록 (debounce로 인한 데이터 유실 방지)
+  window.addEventListener('beforeunload', flushSave);
   // 버전 표시 자동 주입
   const sv = document.getElementById('sidebar-version'); if (sv) sv.textContent = `Smart Workspace v${APP_VERSION}`;
   const ov = document.getElementById('ob-version');      if (ov) ov.textContent = `v${APP_VERSION} — Smart Workspace`;
