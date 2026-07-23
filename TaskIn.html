@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.19.0 (2026-07-23)
+    - UX: 사이드바를 뷰포트 높이로 고정(.app height:100vh/dvh + .sidebar overflow-y:auto) — 본문만 내부 스크롤, 백업·저장공간 메뉴 항상 노출
+    - UX: 칸반 완료 칼럼을 completedAt 최신순 정렬 + 기본 8개만 표시(초과분 '더보기'/'접기' 토글)
+    - 버그: 드래그로 완료 칼럼 이동 시 completedAt 미기록 문제 수정 (완료→다른 상태 이동 시 해제) — 정렬·집계 일관성
+
   v2.18.1 (2026-06-29)
     - 복구: 2.18.0에서 실수로 함께 제거됐던 지식 보관함(위키)을 되돌림 — 저장/백업의 wikiItems 읽기·쓰기 경로 정상
     - main에 잘못 머지된 위키 제거를 되감지 않고, main 위에 복구 커밋을 얹는 정방향 수정으로 처리
@@ -100,7 +105,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.18.1 - 스마트 워크스페이스</title>
+<title>TaskIn v2.19.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -137,8 +142,8 @@
 body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;letter-spacing:-0.02em;line-height:1.5;transition:background 0.3s,color 0.3s;}
 
 /* ── 레이아웃 ── */
-.app{display:flex;min-height:100vh;}
-.sidebar{width:250px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:32px 0 24px 0;flex-shrink:0;z-index:10;}
+.app{display:flex;height:100vh;height:100dvh;overflow:hidden;}
+.sidebar{width:250px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:32px 0 24px 0;flex-shrink:0;z-index:10;height:100vh;height:100dvh;overflow-y:auto;}
 .sidebar-logo{padding:0 24px 24px;margin-bottom:8px;border-bottom:1px solid var(--border);}
 .logo-text{font-size:24px;font-weight:800;color:var(--t1);letter-spacing:-0.04em;}
 .logo-text span{color:var(--acc);}
@@ -1074,11 +1079,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.18.1";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.19.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.19.0", date: "2026-07-23", title: "사이드바 고정 · 완료 업무 정리", items: [
+    "업무가 많아 화면이 길어져도 왼쪽 메뉴(백업·저장공간)가 항상 제자리에 고정돼요",
+    "칸반 '완료' 칼럼은 최근 완료한 8개만 보여주고 나머지는 '더보기'로 접어, 무엇을 했는지 찾기 쉬워졌어요",
+    "완료 업무가 완료한 날짜 최신순으로 정렬돼요 (드래그로 옮겨 완료해도 시점이 기록됩니다)",
+  ]},
   { version: "2.18.1", date: "2026-06-29", title: "지식 보관함 복구", items: [
     "직전 정리 배포(2.18.0)에서 실수로 함께 사라졌던 지식 보관함(위키)을 되돌렸어요",
     "작성해두신 지식 데이터는 기존 저장/백업에서 그대로 복원됩니다",
@@ -1672,6 +1682,9 @@ function getOrderedColItems(st, list) {
   return ordered;
 }
 
+const DONE_COLLAPSE_LIMIT = 8;   // 완료 칼럼 기본 표시 개수 (초과분은 '더보기'로 접기)
+let doneExpanded = false;
+function toggleDoneExpand() { doneExpanded = !doneExpanded; renderBoard(); }
 function renderBoard() {
   const query = (document.getElementById('task-search')?.value || '').toLowerCase();
   let list = tasks.filter(x => activeFilter === 'all' || x.cat === activeFilter);
@@ -1693,7 +1706,11 @@ function renderBoard() {
 
   const board = document.getElementById('kanban-board');
   board.innerHTML = cols.map(st => {
-    const items = getOrderedColItems(st, list);
+    let items = getOrderedColItems(st, list);
+    // 완료 칼럼은 완료일(completedAt) 최신순으로 정렬 — "방금 한 일"이 위로
+    if (st === 'done') items = [...items].sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+    const collapsed = st === 'done' && !doneExpanded && items.length > DONE_COLLAPSE_LIMIT;
+    const shownItems = collapsed ? items.slice(0, DONE_COLLAPSE_LIMIT) : items;
     const m = colMeta[st];
     const overWip = st === 'doing' && items.length > wipLimit;
     const countHtml = st === 'doing'
@@ -1712,7 +1729,7 @@ function renderBoard() {
           ${countHtml}
         </div>
         <div class="kanban-cards-wrap" id="cards-${st}">
-          ${items.map(t => {
+          ${shownItems.map(t => {
             const eiHtml    = t.ei ? `<span class="badge ${EI_BADGE[t.ei]}" style="font-size:10px;padding:2px 6px;">${EI_LABELS[t.ei]}</span>` : '';
             const staleHtml = isStale(t) ? `<span class="badge" style="font-size:10px;padding:2px 6px;background:var(--red-bg);color:var(--red);" title="${daysSince(t.stChangedAt)}일째 ${STATUS_LABEL[t.st]} 상태에서 멈춰있어요">🐢 ${daysSince(t.stChangedAt)}일째</span>` : '';
             const tagsHtml = (t.tags||[]).slice(0,2).map(tag => `<span class="task-tag" style="margin-left:0;font-size:10px;">#${escapeHtml(tag)}</span>`).join('');
@@ -1743,6 +1760,7 @@ function renderBoard() {
               </div>
             `;
           }).join('')}
+          ${st === 'done' && items.length > DONE_COLLAPSE_LIMIT ? `<button onclick="toggleDoneExpand()" style="width:100%;margin-top:4px;padding:10px;border:1px dashed var(--border2);border-radius:12px;background:transparent;color:var(--t3);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;" onmouseover="this.style.borderColor='var(--acc)';this.style.color='var(--acc)';" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--t3)';">${doneExpanded ? '▲ 접기' : `▼ 완료 ${items.length - DONE_COLLAPSE_LIMIT}개 더보기`}</button>` : ''}
           ${items.length === 0 ? `<div class="kanban-empty-drop" ondragover="onColDragOver(event,'${st}')" ondrop="onColDrop(event,'${st}')">여기에 카드를 드롭하세요</div>` : ''}
         </div>
       </div>
@@ -1764,6 +1782,9 @@ function applyCardMove(srcId, targetSt, beforeId) {
     const old = srcTask.st;
     srcTask.st = targetSt;
     srcTask.stChangedAt = todayISO();
+    // 완료 칼럼으로 이동 시 완료 시점 기록, 밖으로 빼면 해제 (완료일 정렬·집계 일관성)
+    if (targetSt === 'done') { if (!srcTask.completedAt) srcTask.completedAt = todayISO(); }
+    else srcTask.completedAt = null;
     srcTask.history.push({ text:`🔄 보드 이동: ${STATUS_LABEL[old]} → ${STATUS_LABEL[targetSt]}`, time:getCurrentDateTime() });
     kanbanOrder[old] = (kanbanOrder[old]||[]).filter(id => id !== srcId);
   }
