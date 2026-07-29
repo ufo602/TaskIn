@@ -10,6 +10,7 @@
 ## [2.19.0] - 2026-07-23
 ### Changed
 - **사이드바 고정** — `.app`를 뷰포트 높이(`height:100vh`/`100dvh` + `overflow:hidden`)로 잡고 `.sidebar`에 `overflow-y:auto` 부여. 업무가 많아 본문이 길어져도 본문만 내부 스크롤되고 왼쪽 메뉴(백업·저장공간 게이지)가 항상 화면에 고정됨
+- **데스크톱 사이드바 접기/펴기** — `◀`/`▶` 토글로 사이드바를 56px 슬림바로 접어 좁은 창에서 공간 확보, 상태를 `localStorage`에 기억 (`toggleSidebarCollapse`/`applySidebarCollapsed`). 접힘 CSS는 `@media (min-width:769px)`로 데스크톱 한정 — 모바일 드로어(햄버거)는 그대로
 - **칸반 완료 칼럼 정리** — 완료 카드를 `completedAt` 최신순으로 정렬하고 기본 8개만 표시, 초과분은 `▼ 완료 N개 더보기`/`▲ 접기` 토글로 접음 (`DONE_COLLAPSE_LIMIT`, `doneExpanded`)
 ### Fixed
 - 드래그로 카드를 완료 칼럼에 옮길 때 `completedAt`이 기록되지 않던 문제 수정 (완료 밖으로 옮기면 해제) — 완료일 정렬·대시보드 완료 집계 일관성 확보

@@ -7,6 +7,7 @@
 
   v2.19.0 (2026-07-23)
     - UX: 사이드바를 뷰포트 높이로 고정(.app height:100vh/dvh + .sidebar overflow-y:auto) — 본문만 내부 스크롤, 백업·저장공간 메뉴 항상 노출
+    - UX: 데스크톱 사이드바 접기/펴기 토글(◀/▶, 56px 슬림바로 접힘, localStorage 상태 기억) — 좁은 창에서 공간 확보. 모바일 드로어는 그대로
     - UX: 칸반 완료 칼럼을 completedAt 최신순 정렬 + 기본 8개만 표시(초과분 '더보기'/'접기' 토글)
     - 버그: 드래그로 완료 칼럼 이동 시 completedAt 미기록 문제 수정 (완료→다른 상태 이동 시 해제) — 정렬·집계 일관성
 
@@ -158,6 +159,17 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 .user-avatar{width:36px;height:36px;border-radius:12px;background:linear-gradient(135deg, var(--acc), var(--pur));display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;box-shadow:var(--shadow-sm);}
 .user-name{font-size:14px;font-weight:700;color:var(--t1);}
 .main{flex:1;overflow-y:auto;background:var(--bg);}
+/* 데스크톱 사이드바 접기/펴기 */
+.sidebar{transition:width .22s cubic-bezier(0.16,1,0.3,1);}
+.sidebar-fold-wrap{display:flex;justify-content:flex-end;padding:0 16px 10px;}
+.sidebar-fold-btn{width:32px;height:32px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--t2);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;padding:0;}
+.sidebar-fold-btn:hover{background:var(--acc-bg);color:var(--acc);border-color:var(--acc);}
+@media (min-width:769px){
+  .app.sidebar-collapsed .sidebar{width:56px;overflow:hidden;}
+  .app.sidebar-collapsed .sidebar > *:not(.sidebar-fold-wrap){display:none;}
+  .app.sidebar-collapsed .sidebar-fold-wrap{justify-content:center;padding:0 0 10px;}
+}
+@media (max-width:768px){ .sidebar-fold-wrap{display:none;} }
 .page{display:none;padding:48px 56px;max-width:1200px;margin:0 auto;}
 .page.active{display:block;animation:fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);}
 
@@ -446,6 +458,9 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
   <button class="menu-toggle" id="menu-toggle" onclick="toggleSidebar()" aria-label="메뉴 열기">☰</button>
   <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
   <div class="sidebar" id="sidebar">
+    <div class="sidebar-fold-wrap">
+      <button class="sidebar-fold-btn" id="sidebar-fold-btn" onclick="toggleSidebarCollapse()" title="사이드바 접기" aria-label="사이드바 접기/펴기">◀</button>
+    </div>
     <div class="sidebar-logo">
       <div class="logo-text">Task<span>In</span></div>
       <div class="logo-sub clickable" id="sidebar-version" onclick="openWhatsNew()" title="패치노트 보기">Smart Workspace</div>
@@ -1084,8 +1099,9 @@ const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
-  { version: "2.19.0", date: "2026-07-23", title: "사이드바 고정 · 완료 업무 정리", items: [
+  { version: "2.19.0", date: "2026-07-23", title: "사이드바 고정·접기 · 완료 업무 정리", items: [
     "업무가 많아 화면이 길어져도 왼쪽 메뉴(백업·저장공간)가 항상 제자리에 고정돼요",
+    "창이 좁을 땐 왼쪽 사이드바를 ◀ 버튼으로 얇게 접어 공간을 넓게 쓰고, ▶로 다시 펼 수 있어요 (접힘 상태 기억)",
     "칸반 '완료' 칼럼은 최근 완료한 8개만 보여주고 나머지는 '더보기'로 접어, 무엇을 했는지 찾기 쉬워졌어요",
     "완료 업무가 완료한 날짜 최신순으로 정렬돼요 (드래그로 옮겨 완료해도 시점이 기록됩니다)",
   ]},
@@ -1594,6 +1610,21 @@ function closeSidebar() {
   const bd = document.getElementById('sidebar-backdrop');
   if (sb) sb.classList.remove('open');
   if (bd) bd.classList.remove('open');
+}
+// 데스크톱 사이드바 접기/펴기 (상태 기억)
+function updateFoldBtn(collapsed) {
+  const b = document.getElementById('sidebar-fold-btn');
+  if (b) { b.textContent = collapsed ? '▶' : '◀'; b.title = collapsed ? '사이드바 펴기' : '사이드바 접기'; }
+}
+function toggleSidebarCollapse() {
+  const collapsed = document.getElementById('app').classList.toggle('sidebar-collapsed');
+  localStorage.setItem('taskin_sidebar_collapsed', collapsed ? '1' : '0');
+  updateFoldBtn(collapsed);
+}
+function applySidebarCollapsed() {
+  const collapsed = localStorage.getItem('taskin_sidebar_collapsed') === '1';
+  document.getElementById('app').classList.toggle('sidebar-collapsed', collapsed);
+  updateFoldBtn(collapsed);
 }
 
 // ════════ 패치노트(새로워진 점) ════════
@@ -3600,6 +3631,7 @@ function applyTheme() {
 // ════════ 초기화 ════════
 (function init() {
   applyTheme();
+  applySidebarCollapsed();    // 저장된 사이드바 접힘 상태 복원 (데스크톱)
   loadAll();
   setupModalA11y();          // 모달 Escape 닫기·포커스 트랩·복귀 설정
   recomputeTaskDates();      // 저장된 dlv/dl/urg를 오늘 기준으로 다시 계산 (세션 간 노후화 방지)
