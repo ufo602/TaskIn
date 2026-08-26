@@ -5,6 +5,11 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.20.0 (2026-08-26)
+    - 기능: 미완료 업무 정리 — 완료가 아닌 태스크를 "업무명(~8.14)" 형식 목록으로 생성 (보고서·메신저 붙여넣기용)
+    - 마감 빠른 순 정렬(기한 미정은 맨 뒤), 마감 초과 시 "(~8.9, 지연)" 표시, 전체/업무/개인 범위 선택
+    - 생성 결과를 textarea에서 직접 수정 후 복사 가능, 진입: 대시보드 빠른 도구 · 전체 태스크 헤더 버튼
+
   v2.19.0 (2026-07-23)
     - UX: 사이드바를 뷰포트 높이로 고정(.app height:100vh/dvh + .sidebar overflow-y:auto) — 본문만 내부 스크롤, 백업·저장공간 메뉴 항상 노출
     - UX: 데스크톱 사이드바 접기/펴기 토글(◀/▶, 56px 슬림바로 접힘, localStorage 상태 기억) — 좁은 창에서 공간 확보. 모바일 드로어는 그대로
@@ -106,7 +111,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.19.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.20.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -545,6 +550,10 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
             <div class="quick-icon" style="background:var(--grn-bg);color:var(--grn);">🧠</div>
             <span class="quick-lbl">AI 지식 자동 정리</span>
           </div>
+          <div class="quick-btn" onclick="openSummaryModal()">
+            <div class="quick-icon" style="background:var(--amb-bg);color:var(--amb);">📋</div>
+            <span class="quick-lbl">미완료 업무 정리</span>
+          </div>
           <div class="quick-btn" onclick="focusAddTask()">
             <div class="quick-icon" style="background:var(--surface2);color:var(--t2);">+</div>
             <span class="quick-lbl">새 태스크</span>
@@ -568,6 +577,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
               보드
             </button>
           </div>
+          <button class="btn btn-ghost" onclick="openSummaryModal()" title="완료되지 않은 업무를 목록으로 정리">📋 미완료 정리</button>
           <button class="btn ai-btn-style" onclick="openAIModal()">✨ AI 메일 분석</button>
         </div>
       </div>
@@ -1078,6 +1088,34 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
   </div>
 </div>
 
+<!-- 미완료 업무 정리 -->
+<div class="modal-overlay" id="summary-modal-overlay" style="display:none;" onclick="closeAllModals(event)">
+  <div class="modal-box" style="width:620px;">
+    <div class="modal-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="font-size:22px;font-weight:800;color:var(--t1);margin:0;display:flex;align-items:center;gap:8px;"><span style="color:var(--amb);">📋</span> 미완료 업무 정리</h3>
+        <button class="btn btn-ghost" style="padding:10px;border-radius:50%;border:none;background:var(--surface2);" onclick="closeAllModals()" aria-label="닫기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+        <button class="filter-chip on" id="sum-scope-all"      onclick="setSummaryScope('all')">전체</button>
+        <button class="filter-chip"    id="sum-scope-work"     onclick="setSummaryScope('work')">💼 업무</button>
+        <button class="filter-chip"    id="sum-scope-personal" onclick="setSummaryScope('personal')">🏠 개인</button>
+        <span id="summary-count" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--t3);"></span>
+      </div>
+      <textarea id="summary-output" class="custom-input" style="height:300px;line-height:1.9;font-size:14px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm);resize:vertical;" spellcheck="false"></textarea>
+      <div style="font-size:12px;font-weight:600;color:var(--t3);margin-top:10px;line-height:1.6;">※ 마감일이 빠른 순으로 정렬됩니다. 기한이 지난 업무는 <b>(지연)</b>으로 표시돼요.<br>내용을 직접 고친 뒤 복사해도 됩니다.</div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;">
+      <button class="btn btn-ghost" style="padding:12px 20px;" onclick="closeAllModals()">닫기</button>
+      <button class="btn btn-primary" style="padding:12px 24px;" onclick="copySummary()">📋 복사하기</button>
+    </div>
+  </div>
+</div>
+
 <!-- 공통 다이얼로그 (alert/confirm/prompt 대체) -->
 <div class="modal-overlay" id="dialog-overlay" style="display:none;z-index:2600;" onclick="if(event.target.id==='dialog-overlay')closeModalEl(this)">
   <div class="modal-box" style="width:420px;max-width:92vw;">
@@ -1094,11 +1132,17 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.19.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.20.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.20.0", date: "2026-08-26", title: "미완료 업무 정리 (보고용 목록)", items: [
+    "완료하지 않은 업무를 '업무명(~8.14)' 형식의 목록으로 한 번에 정리해요 — 보고서·메신저에 바로 붙여넣기 좋아요",
+    "마감이 빠른 순으로 정렬되고, 기한이 지난 업무는 (지연)으로 표시돼요",
+    "전체 / 💼 업무 / 🏠 개인 범위를 골라서 만들 수 있고, 내용을 고친 뒤 복사해도 됩니다",
+    "대시보드 '빠른 도구' 또는 전체 태스크 화면의 '📋 미완료 정리' 버튼에서 열 수 있어요",
+  ]},
   { version: "2.19.0", date: "2026-07-23", title: "사이드바 고정·접기 · 완료 업무 정리", items: [
     "업무가 많아 화면이 길어져도 왼쪽 메뉴(백업·저장공간)가 항상 제자리에 고정돼요",
     "창이 좁을 땐 왼쪽 사이드바를 ◀ 버튼으로 얇게 접어 공간을 넓게 쓰고, ▶로 다시 펼 수 있어요 (접힘 상태 기억)",
@@ -3418,6 +3462,74 @@ function renderWikiList() {
     const plain=item.content.replace(/!\[.*?\]\(.*?\)/g,'[이미지]').replace(/[#*`~>|_-]/g,' ').substring(0,120);
     return `<div class="wiki-card" onclick="openWikiModal(${item.id})"><span class="wiki-tag">${catMap[item.category]||'기타'}</span><div class="wiki-title">${escapeHtml(item.title)}</div><div class="wiki-content">${escapeHtml(plain)}...</div><div style="margin-top:20px;font-size:12px;font-weight:600;color:var(--t3);">업데이트: ${item.updatedAt.split(' ')[0]}</div></div>`;
   }).join('');
+}
+
+// ════════ 미완료 업무 정리 (보고용 목록 생성) ════════
+let summaryScope = 'all';   // all | work | personal
+
+// 'YYYY-MM-DD' → '8.14' (앞자리 0 제거)
+function formatSummaryDate(rawDate) {
+  const p = rawDate.split('-');
+  return `${parseInt(p[1], 10)}.${parseInt(p[2], 10)}`;
+}
+
+// 미완료(완료가 아닌) 태스크를 마감 빠른 순으로 — 기한 미정은 맨 뒤
+function getPendingTasks() {
+  return tasks
+    .filter(t => t.st !== 'done')
+    .filter(t => summaryScope === 'all' || t.cat === summaryScope)
+    .slice()
+    .sort((a, b) => {
+      const ad = a.rawDate || '', bd = b.rawDate || '';
+      if (!ad && !bd) return String(a.title).localeCompare(String(b.title));
+      if (!ad) return 1;
+      if (!bd) return -1;
+      return ad.localeCompare(bd);
+    });
+}
+
+// "- 업무명(~8.14)" / 기한 없으면 "(기한 미정)" / 마감 초과면 "(~8.9, 지연)"
+function buildPendingSummary() {
+  return getPendingTasks().map(t => {
+    if (!t.rawDate) return `- ${t.title}(기한 미정)`;
+    const overdue = dlvFromDate(t.rawDate) < 0;
+    return `- ${t.title}(~${formatSummaryDate(t.rawDate)}${overdue ? ', 지연' : ''})`;
+  }).join('\n');
+}
+
+function renderSummary() {
+  const list = getPendingTasks();
+  const text = buildPendingSummary();
+  const out = document.getElementById('summary-output');
+  // textarea.value 로 넣으므로 HTML 해석되지 않음 (XSS 안전)
+  out.value = text || '미완료 업무가 없습니다. 🎉';
+  const overdueCnt = list.filter(t => t.rawDate && dlvFromDate(t.rawDate) < 0).length;
+  document.getElementById('summary-count').textContent =
+    `미완료 ${list.length}건${overdueCnt ? ` · 지연 ${overdueCnt}건` : ''}`;
+}
+
+function setSummaryScope(scope) {
+  summaryScope = scope;
+  ['all','work','personal'].forEach(s => {
+    document.getElementById('sum-scope-' + s)?.classList.toggle('on', s === scope);
+  });
+  renderSummary();
+}
+
+function openSummaryModal() {
+  closeAllModals();
+  renderSummary();
+  const m = document.getElementById('summary-modal-overlay');
+  m.style.display = 'flex';
+  setTimeout(() => m.classList.add('open'), 10);
+}
+
+function copySummary() {
+  const text = document.getElementById('summary-output').value;
+  if (!text.trim()) return showAlert('복사할 내용이 없습니다.');
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('📋 미완료 업무 목록을 복사했어요!', 'grn'))
+    .catch(() => showPrompt('아래 내용을 복사하세요 (Ctrl+C):', text));
 }
 
 // ════════ 데이터 내보내기/가져오기 ════════
