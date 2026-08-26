@@ -5,6 +5,14 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.21.0 (2026-08-26)
+    - 기능: 마감 시간(dueTime, 선택) 지원 — 등록 줄 time 입력 + 상세 모달 ⏰ 칸(✕로 해제)
+    - formatDl(rawDate, dueTime)로 '오늘 18시'·'8.14 18:30' 표시, 정각은 '18시'로 축약
+    - isOverdue(t)/dueDateTime(t) 도입 — 시간 지정 시 시각까지 반영해 지연 판정 (미지정은 그 날 23:59 기준)
+    - 미완료 정리·알림 센터가 시간 기준으로 동작, 같은 날은 마감 시간 이른 순 정렬
+    - ICS 내보내기: 시간 지정 업무는 종일이 아닌 1시간 일정(DTSTART/DTEND)으로 출력
+    - 구버전 데이터 마이그레이션(dueTime 기본 '') — 백업 호환 유지
+
   v2.20.0 (2026-08-26)
     - 기능: 미완료 업무 정리 — 완료가 아닌 태스크를 "업무명(~8.14)" 형식 목록으로 생성 (보고서·메신저 붙여넣기용)
     - 마감 빠른 순 정렬(기한 미정은 맨 뒤), 마감 초과 시 "(~8.9, 지연)" 표시, 전체/업무/개인 범위 선택
@@ -111,7 +119,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.20.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.21.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -610,6 +618,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
           </select>
           <div style="width:1px;height:20px;background:var(--border2);margin:0 4px;"></div>
           <input type="date" id="task-date" title="마감일 지정"/>
+          <input type="time" id="task-time" title="마감 시간 지정 (선택)" style="width:96px;"/>
           <div style="width:1px;height:20px;background:var(--border2);margin:0 4px;"></div>
           <select id="task-cat" title="분류">
             <option value="work">💼 업무</option>
@@ -845,6 +854,11 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
         <span class="meta-pill" id="modal-dl-wrap" style="position:relative;overflow:hidden;" title="마감일 수정" onclick="try{this.querySelector('input').showPicker()}catch(e){}">
           🗓 <span id="modal-dl-text"></span>
           <input type="date" id="modal-dl-input" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;" onchange="updateModalDate(this.value)"/>
+        </span>
+        <span class="meta-pill" id="modal-time-wrap" style="position:relative;overflow:hidden;" title="마감 시간 (선택)" onclick="try{this.querySelector('input[type=time]').showPicker()}catch(e){}">
+          ⏰ <span id="modal-time-text">시간</span>
+          <button id="modal-time-clear" onclick="event.stopPropagation();updateModalTime('')" title="마감 시간 해제" style="display:none;background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:12px;padding:0 0 0 4px;position:relative;z-index:3;font-family:inherit;">✕</button>
+          <input type="time" id="modal-time-input" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;" onchange="updateModalTime(this.value)"/>
         </span>
         <span class="meta-pill" id="modal-cat" onclick="toggleModalCat()" title="분류 변경"></span>
         <span class="meta-pill" id="modal-req-wrap" style="position:relative;min-width:90px;" title="요청자 수정">
@@ -1132,11 +1146,18 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.20.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.21.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.21.0", date: "2026-08-26", title: "마감 시간 지정", items: [
+    "마감일에 시간까지 정할 수 있어요 — 예: 8월 14일 18시까지",
+    "등록 줄의 시계 입력, 또는 상세 화면의 ⏰ 칸에서 지정하고 ✕로 해제할 수 있어요 (시간은 선택 사항)",
+    "미완료 업무 정리에도 '업무명(~8.14 18시)' 처럼 시간이 함께 나와요",
+    "마감 시간이 지나면 '지연'으로 표시되고, 알림도 시간 기준으로 안내해요",
+    "구글 캘린더로 내보낼 때 시간을 지정한 업무는 종일이 아닌 해당 시간 일정으로 저장돼요",
+  ]},
   { version: "2.20.0", date: "2026-08-26", title: "미완료 업무 정리 (보고용 목록)", items: [
     "완료하지 않은 업무를 '업무명(~8.14)' 형식의 목록으로 한 번에 정리해요 — 보고서·메신저에 바로 붙여넣기 좋아요",
     "마감이 빠른 순으로 정렬되고, 기한이 지난 업무는 (지연)으로 표시돼요",
@@ -1407,6 +1428,7 @@ function loadAll() {
     if (!t.points)     t.points = 1;
     if (!t.retro)      t.retro = '';
     if (!t.subtasks)   t.subtasks = [];
+    if (t.dueTime === undefined) t.dueTime = '';   // 마감 시간(선택) — 구버전 데이터 마이그레이션
     if (!t.ei)         t.ei = null;
     if (t.repeat === undefined) t.repeat = null;
     // WIP·정체 감지 도입 이전 데이터 백필: history에서 마지막 상태변경 시각 추정, 없으면 오늘로(과잉 경고 방지)
@@ -1455,11 +1477,35 @@ function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 function dlvFromDate(s) { if (!s) return 99; return Math.round((new Date(s) - TODAY) / 86400000); }
-function formatDl(s) {
+// 'HH:MM' → '18시' (정각) / '18:30' (분 단위)
+function formatTimeLabel(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  if (isNaN(h)) return '';
+  return m ? `${h}:${String(m).padStart(2,'0')}` : `${h}시`;
+}
+// 마감 시각(Date). 시간 미지정이면 그 날 23:59:59로 간주(하루가 끝날 때까지 여유)
+function dueDateTime(t) {
+  if (!t || !t.rawDate) return null;
+  const [y, mo, d] = t.rawDate.split('-').map(Number);
+  if (t.dueTime) {
+    const [h, mi] = t.dueTime.split(':').map(Number);
+    if (!isNaN(h)) return new Date(y, mo-1, d, h, mi||0, 0, 0);
+  }
+  return new Date(y, mo-1, d, 23, 59, 59, 999);
+}
+// 마감 초과 여부 — 시간이 지정돼 있으면 시각까지 반영
+function isOverdue(t) {
+  if (!t || t.st === 'done') return false;
+  const dt = dueDateTime(t);
+  return dt ? dt.getTime() < Date.now() : false;
+}
+function formatDl(s, dueTime) {
   if (!s) return '미정';
   const v = dlvFromDate(s);
-  if (v === 0) return '오늘'; if (v === 1) return '내일';
-  const p = s.split('-'); return `${p[1]}.${p[2]}`;
+  const tp = dueTime ? ' ' + formatTimeLabel(dueTime) : '';
+  if (v === 0) return '오늘' + tp; if (v === 1) return '내일' + tp;
+  const p = s.split('-'); return `${p[1]}.${p[2]}` + tp;
 }
 function urgFromDlv(v) { return v <= 0 ? 'urgent' : v <= 5 ? 'warn' : 'ok'; }
 
@@ -1471,8 +1517,8 @@ let _midnightTimer = null;
 function recomputeTaskDates() {
   tasks.forEach(t => {
     t.dlv = dlvFromDate(t.rawDate);
-    t.dl  = formatDl(t.rawDate);
-    t.urg = t.st === 'done' ? 'ok' : urgFromDlv(t.dlv);
+    t.dl  = formatDl(t.rawDate, t.dueTime);
+    t.urg = t.st === 'done' ? 'ok' : (isOverdue(t) ? 'urgent' : urgFromDlv(t.dlv));
   });
 }
 function scheduleMidnightRollover() {
@@ -2313,16 +2359,18 @@ function addTask() {
   const tags   = parseTags(document.getElementById('task-tags-input').value.trim());
   const points = Number(document.getElementById('task-points').value) || 1;
   const date   = document.getElementById('task-date').value;
+  const dueTime = document.getElementById('task-time').value;
   const req    = document.getElementById('task-req').value.trim();
   const cat    = document.getElementById('task-cat').value;
   if (!title) return;
-  const newTask = { id:nextId++, title, tags, points, retro:'', rawDate:date, req, cat, st:'todo',
-    dlv:dlvFromDate(date), dl:formatDl(date), urg:urgFromDlv(dlvFromDate(date)),
+  const newTask = { id:nextId++, title, tags, points, retro:'', rawDate:date, dueTime, req, cat, st:'todo',
+    dlv:dlvFromDate(date), dl:formatDl(date, dueTime), urg:urgFromDlv(dlvFromDate(date)),
     memo:'', history:[{text:'새 할 일 등록됨', time:getCurrentDateTime()}],
     subtasks:[], ei:null, repeat:null, stChangedAt:todayISO() };
   tasks.push(newTask);
   document.getElementById('task-title').value = '';
   document.getElementById('task-tags-input').value = '';
+  document.getElementById('task-time').value = '';
   saveAll(); renderCurrentView(); renderDashboard();
   // ① 마감일 있으면 캘린더 이동 토스트
   if (date) {
@@ -2360,14 +2408,14 @@ function spawnNextRecurrence(t) {
   const nextDate = next.toISOString().split('T')[0];
   const newTask = {
     id:nextId++, title:t.title, tags:[...(t.tags||[])], points:t.points||1, retro:'',
-    rawDate:nextDate, req:t.req||'', cat:t.cat, st:'todo',
-    dlv:dlvFromDate(nextDate), dl:formatDl(nextDate), urg:urgFromDlv(dlvFromDate(nextDate)),
+    rawDate:nextDate, dueTime:t.dueTime||'', req:t.req||'', cat:t.cat, st:'todo',
+    dlv:dlvFromDate(nextDate), dl:formatDl(nextDate, t.dueTime), urg:urgFromDlv(dlvFromDate(nextDate)),
     memo:t.memo||'', history:[{text:`🔁 반복 태스크 자동 생성 (이전: ${t.dl})`, time:getCurrentDateTime()}],
     subtasks:(t.subtasks||[]).map(s=>({text:s.text,done:false})),
     ei:t.ei||null, repeat:t.repeat, stChangedAt:todayISO()
   };
   tasks.push(newTask);
-  showToast(`🔁 반복 태스크 "${escapeHtml(t.title.length>12?t.title.slice(0,12)+'…':t.title)}" 다음 주기(${formatDl(nextDate)})가 생성되었습니다.`, 'acc', 4000);
+  showToast(`🔁 반복 태스크 "${escapeHtml(t.title.length>12?t.title.slice(0,12)+'…':t.title)}" 다음 주기(${formatDl(nextDate, t.dueTime)})가 생성되었습니다.`, 'acc', 4000);
 }
 
 function updateModalRepeat(val) {
@@ -2384,7 +2432,7 @@ function updateTaskPoints(id, val) {
 }
 function updateTaskDate(id, v) {
   const t = tasks.find(x => x.id === id); if (!t) return;
-  t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
+  t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v, t.dueTime); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
   t.history.push({ text:'🗓 마감일 수정됨', time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); renderDashboard();
 }
@@ -2460,6 +2508,10 @@ function openModal(id) {
   document.getElementById('modal-dl-text').textContent = t.dl;
   document.getElementById('modal-dl-wrap').className   = `meta-pill badge-${t.urg}`;
   document.getElementById('modal-dl-input').value      = t.rawDate||'';
+  // 마감 시간(선택)
+  document.getElementById('modal-time-text').textContent = t.dueTime ? formatTimeLabel(t.dueTime) : '시간';
+  document.getElementById('modal-time-input').value      = t.dueTime || '';
+  document.getElementById('modal-time-clear').style.display = t.dueTime ? 'inline' : 'none';
 
   const catEl = document.getElementById('modal-cat');
   catEl.textContent = t.cat==='work'?'💼 업무':'🏠 개인';
@@ -2504,8 +2556,17 @@ function cycleModalStatus()   { if (currentTaskId) { cycleTaskStatus(currentTask
 function updateModalDate(v) {
   const t = tasks.find(x => x.id === currentTaskId);
   if (!t) return;
-  t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
+  t.rawDate=v; t.dlv=dlvFromDate(v); t.dl=formatDl(v, t.dueTime); t.urg=t.st==='done'?'ok':urgFromDlv(t.dlv);
   t.history.push({ text:'🗓 마감일 업데이트', time:getCurrentDateTime() });
+  saveAll(); renderCurrentView(); openModal(currentTaskId);
+}
+// 마감 시간(선택) 수정 — 빈 값이면 시간 해제
+function updateModalTime(v) {
+  const t = tasks.find(x => x.id === currentTaskId);
+  if (!t) return;
+  t.dueTime = v || '';
+  t.dl = formatDl(t.rawDate, t.dueTime);
+  t.history.push({ text: v ? `⏰ 마감 시간 설정: ${formatTimeLabel(v)}` : '⏰ 마감 시간 해제', time:getCurrentDateTime() });
   saveAll(); renderCurrentView(); openModal(currentTaskId);
 }
 function updateModalReq(v) {
@@ -3289,9 +3350,11 @@ function renderNotif() {
   }
 
   // ⑧ 마감 기준 그룹핑 — 초과 / 오늘 / D-3 예고
-  const overdue = tasks.filter(t => t.dlv < 0  && t.st !== 'done').sort((a,b)=>a.dlv-b.dlv);
-  const today   = tasks.filter(t => t.dlv === 0 && t.st !== 'done');
-  const soon    = tasks.filter(t => t.dlv > 0 && t.dlv <= 3 && t.st !== 'done').sort((a,b)=>a.dlv-b.dlv);
+  // 마감 시간이 지정된 경우 시각까지 반영해 '초과' 판정
+  const pending = tasks.filter(t => t.st !== 'done');
+  const overdue = pending.filter(t => isOverdue(t)).sort((a,b)=>a.dlv-b.dlv);
+  const today   = pending.filter(t => !isOverdue(t) && t.dlv === 0);
+  const soon    = pending.filter(t => !isOverdue(t) && t.dlv > 0 && t.dlv <= 3).sort((a,b)=>a.dlv-b.dlv);
 
   if (!overdue.length && !today.length && !soon.length) {
     container.innerHTML = permBanner + '<div class="card" style="text-align:center;padding:80px 20px;font-size:15px;font-weight:600;color:var(--t3);border-radius:20px;border:1px dashed var(--border2);background:transparent;box-shadow:none;">모든 일정이 여유롭습니다. ☕️</div>';
@@ -3312,11 +3375,15 @@ function renderNotif() {
   let html = permBanner;
   if (overdue.length) {
     html += `<div class="sec-label" style="color:var(--red);margin-top:8px;">⛔ 마감 초과 (${overdue.length})</div>`;
-    html += overdue.map(t=>card(t,'var(--red)',`🚨 마감일이 ${Math.abs(t.dlv)}일 지났습니다!`)).join('');
+    html += overdue.map(t=>card(t,'var(--red)', t.dlv === 0
+      ? `🚨 오늘 마감 시간(${escapeHtml(formatTimeLabel(t.dueTime))})이 지났습니다!`
+      : `🚨 마감일이 ${Math.abs(t.dlv)}일 지났습니다!`)).join('');
   }
   if (today.length) {
     html += `<div class="sec-label" style="color:var(--red);margin-top:16px;">🔥 오늘 마감 (${today.length})</div>`;
-    html += today.map(t=>card(t,'var(--red)','오늘이 마감일입니다! 서둘러주세요.')).join('');
+    html += today.map(t=>card(t,'var(--red)', t.dueTime
+      ? `오늘 ${escapeHtml(formatTimeLabel(t.dueTime))}까지입니다! 서둘러주세요.`
+      : '오늘이 마감일입니다! 서둘러주세요.')).join('');
   }
   if (soon.length) {
     html += `<div class="sec-label" style="color:var(--amb);margin-top:16px;">⏳ 마감 임박 예고 (${soon.length})</div>`;
@@ -3416,7 +3483,7 @@ async function handleAIParse() {
     return null;
   }
   const autoEi = estimateEi(successData.date, successData.title||'', successData.memo||'');
-  const newTask = { id:nextId++, title:successData.title||'새 할 일', tags:successData.tags||[], points:1, retro:'', rawDate:successData.date||'', req:successData.req||'', cat:'work', st:'todo', dlv:dlvFromDate(successData.date), dl:formatDl(successData.date), urg:urgFromDlv(dlvFromDate(successData.date)), memo:successData.memo||'', history:[{text:'✨ AI 스캔으로 자동 생성됨 (Groq)',time:getCurrentDateTime()}], subtasks:[], ei:autoEi, stChangedAt:todayISO() };
+  const newTask = { id:nextId++, title:successData.title||'새 할 일', tags:successData.tags||[], points:1, retro:'', rawDate:successData.date||'', dueTime:'', req:successData.req||'', cat:'work', st:'todo', dlv:dlvFromDate(successData.date), dl:formatDl(successData.date), urg:urgFromDlv(dlvFromDate(successData.date)), memo:successData.memo||'', history:[{text:'✨ AI 스캔으로 자동 생성됨 (Groq)',time:getCurrentDateTime()}], subtasks:[], ei:autoEi, stChangedAt:todayISO() };
   tasks.push(newTask); saveAll(); renderCurrentView(); renderDashboard(); closeAllModals(); setTimeout(()=>openModal(newTask.id),300);
 }
 
@@ -3484,7 +3551,9 @@ function getPendingTasks() {
       if (!ad && !bd) return String(a.title).localeCompare(String(b.title));
       if (!ad) return 1;
       if (!bd) return -1;
-      return ad.localeCompare(bd);
+      if (ad !== bd) return ad.localeCompare(bd);
+      // 같은 날이면 마감 시간이 이른 순 (시간 미지정은 그 날의 맨 뒤)
+      return (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99');
     });
 }
 
@@ -3492,8 +3561,8 @@ function getPendingTasks() {
 function buildPendingSummary() {
   return getPendingTasks().map(t => {
     if (!t.rawDate) return `- ${t.title}(기한 미정)`;
-    const overdue = dlvFromDate(t.rawDate) < 0;
-    return `- ${t.title}(~${formatSummaryDate(t.rawDate)}${overdue ? ', 지연' : ''})`;
+    const timePart = t.dueTime ? ` ${formatTimeLabel(t.dueTime)}` : '';
+    return `- ${t.title}(~${formatSummaryDate(t.rawDate)}${timePart}${isOverdue(t) ? ', 지연' : ''})`;
   }).join('\n');
 }
 
@@ -3503,7 +3572,7 @@ function renderSummary() {
   const out = document.getElementById('summary-output');
   // textarea.value 로 넣으므로 HTML 해석되지 않음 (XSS 안전)
   out.value = text || '미완료 업무가 없습니다. 🎉';
-  const overdueCnt = list.filter(t => t.rawDate && dlvFromDate(t.rawDate) < 0).length;
+  const overdueCnt = list.filter(t => isOverdue(t)).length;
   document.getElementById('summary-count').textContent =
     `미완료 ${list.length}건${overdueCnt ? ` · 지연 ${overdueCnt}건` : ''}`;
 }
@@ -3635,8 +3704,20 @@ function exportICS() {
     lines.push('BEGIN:VEVENT');
     lines.push(fold(`UID:${uid}`));
     lines.push(fold(`DTSTAMP:${icsNow()}`));
-    lines.push(fold(`DTSTART;VALUE=DATE:${dateStr}`));
-    lines.push(fold(`DTEND;VALUE=DATE:${endDate}`));
+    if (t.dueTime) {
+      // 마감 시간이 지정된 경우: 종일이 아니라 해당 시각의 1시간 일정 (플로팅 로컬 시각)
+      const hhmm = t.dueTime.replace(':', '');
+      const [hh, mi] = t.dueTime.split(':').map(Number);
+      const endH = String((hh + 1) % 24).padStart(2, '0');
+      const endDayStr = (hh + 1) >= 24
+        ? icsDate(new Date(new Date(t.rawDate).getTime() + 86400000).toISOString().split('T')[0])
+        : dateStr;
+      lines.push(fold(`DTSTART:${dateStr}T${hhmm}00`));
+      lines.push(fold(`DTEND:${endDayStr}T${endH}${String(mi).padStart(2,'0')}00`));
+    } else {
+      lines.push(fold(`DTSTART;VALUE=DATE:${dateStr}`));
+      lines.push(fold(`DTEND;VALUE=DATE:${endDate}`));
+    }
     lines.push(fold(`SUMMARY:${esc(summary)}`));
     lines.push(fold(`DESCRIPTION:${esc(descParts.join('\n'))}`));
     lines.push(fold(`STATUS:${icsStatus}`));
@@ -3678,7 +3759,7 @@ function importData(event) {
       if(!await showConfirm(`${verInfo}기존 데이터를 덮어씌우고 이 백업을 불러올까요?`)){ event.target.value=''; return; }
       tasks=data.tasks; wikiItems=data.wikiItems||[]; trashBin=data.trashBin||[]; nextId=data.nextId||100;
       kanbanOrder=data.kanbanOrder||{ todo:[], doing:[], hold:[], done:[] };
-      tasks.forEach(t=>{ if(!t.tags) t.tags=[]; if(!t.points) t.points=1; if(!t.retro) t.retro=''; if(!t.subtasks) t.subtasks=[]; if(!t.ei) t.ei=null; if(t.repeat===undefined) t.repeat=null; if(t.completedAt===undefined) t.completedAt=(t.st==='done'?todayISO():null); if(t.stChangedAt===undefined) t.stChangedAt=todayISO(); });
+      tasks.forEach(t=>{ if(!t.tags) t.tags=[]; if(!t.points) t.points=1; if(!t.retro) t.retro=''; if(!t.subtasks) t.subtasks=[]; if(t.dueTime===undefined) t.dueTime=''; if(!t.ei) t.ei=null; if(t.repeat===undefined) t.repeat=null; if(t.completedAt===undefined) t.completedAt=(t.st==='done'?todayISO():null); if(t.stChangedAt===undefined) t.stChangedAt=todayISO(); });
       // 백업에 저장된 사용자명이 있으면 복원 제안
       if (data.user && data.user !== localStorage.getItem('taskin_user')) {
         if (await showConfirm(`백업의 사용자 이름 "${data.user}"으로 변경할까요?`)) {
