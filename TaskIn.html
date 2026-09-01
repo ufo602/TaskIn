@@ -5,6 +5,14 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.22.0 (2026-08-26)
+    - 기능: 빠른 등록 — 붙여넣은 텍스트를 줄 단위로 나눠 체크한 것만 일괄 태스크 생성 (AI 호출 없음, 즉시)
+    - stripMailPrefix(): RE:/FW:/FWD:/답장:/전달:/회신: 및 [RE] 형태 접두어 반복 제거
+    - detectDateInText(): 'YYYY-MM-DD', 'M월 D일', 'M/D'·'M.D' 인식 → 마감일 자동 설정
+      (연도 미기재 시 올해 기준, 6개월 이상 지난 날짜는 내년으로 추정 / 2.30 같은 무효 날짜는 무시)
+    - 각 줄의 제목·마감일을 등록 전에 인라인 수정 가능, 전체 선택/해제 제공
+    - 진입: 대시보드 빠른 도구 · 전체 태스크 헤더 '⚡ 빠른 등록'
+
   v2.21.0 (2026-08-26)
     - 기능: 마감 시간(dueTime, 선택) 지원 — 등록 줄 time 입력 + 상세 모달 ⏰ 칸(✕로 해제)
     - formatDl(rawDate, dueTime)로 '오늘 18시'·'8.14 18:30' 표시, 정각은 '18시'로 축약
@@ -119,7 +127,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.21.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.22.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -558,6 +566,10 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
             <div class="quick-icon" style="background:var(--grn-bg);color:var(--grn);">🧠</div>
             <span class="quick-lbl">AI 지식 자동 정리</span>
           </div>
+          <div class="quick-btn" onclick="openQuickAdd()">
+            <div class="quick-icon" style="background:var(--acc-bg);color:var(--acc);">⚡</div>
+            <span class="quick-lbl">빠른 등록 (붙여넣기)</span>
+          </div>
           <div class="quick-btn" onclick="openSummaryModal()">
             <div class="quick-icon" style="background:var(--amb-bg);color:var(--amb);">📋</div>
             <span class="quick-lbl">미완료 업무 정리</span>
@@ -585,6 +597,7 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
               보드
             </button>
           </div>
+          <button class="btn btn-ghost" onclick="openQuickAdd()" title="메일 제목 등을 붙여넣어 여러 건을 한 번에 등록">⚡ 빠른 등록</button>
           <button class="btn btn-ghost" onclick="openSummaryModal()" title="완료되지 않은 업무를 목록으로 정리">📋 미완료 정리</button>
           <button class="btn ai-btn-style" onclick="openAIModal()">✨ AI 메일 분석</button>
         </div>
@@ -1102,6 +1115,40 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
   </div>
 </div>
 
+<!-- 빠른 등록 (메일 제목 붙여넣기) -->
+<div class="modal-overlay" id="quickadd-modal-overlay" style="display:none;" onclick="closeAllModals(event)">
+  <div class="modal-box" style="width:680px;">
+    <div class="modal-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="font-size:22px;font-weight:800;color:var(--t1);margin:0;display:flex;align-items:center;gap:8px;"><span style="color:var(--acc);">⚡</span> 빠른 등록 (붙여넣기)</h3>
+        <button class="btn btn-ghost" style="padding:10px;border-radius:50%;border:none;background:var(--surface2);" onclick="closeAllModals()" aria-label="닫기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--t2);background:var(--acc-bg);border:1px solid rgba(79,70,229,0.2);border-radius:14px;padding:14px 18px;margin-bottom:16px;line-height:1.7;">
+        메일 제목이나 목록을 <b>그대로 붙여넣으세요.</b> 줄마다 체크해서 원하는 것만 등록합니다.<br>
+        <span style="color:var(--t3);">· <code>RE:</code> / <code>FW:</code> 같은 접두어는 자동으로 지워요 · 줄 안의 날짜(8/14, 8월 14일)는 마감일로 자동 인식해요</span>
+      </div>
+      <textarea id="quickadd-input" class="custom-input" style="height:120px;line-height:1.7;font-size:14px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm);resize:vertical;margin-bottom:12px;" placeholder="예)&#10;RE: [공지] 데이터 활용 수요조사 제출 요청 (~8/14)&#10;정보시스템 감사 자료 제출 8월 20일까지&#10;안녕하세요, 담당자님" oninput="parseQuickAdd()"></textarea>
+      <div id="quickadd-empty" style="text-align:center;padding:28px;color:var(--t3);font-size:14px;font-weight:600;">위에 내용을 붙여넣으면 줄 단위로 보여드릴게요.</div>
+      <div id="quickadd-listwrap" style="display:none;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px;border-radius:9px;" onclick="selectAllQuickAdd(true)">전체 선택</button>
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px;border-radius:9px;" onclick="selectAllQuickAdd(false)">전체 해제</button>
+          <span id="quickadd-count" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--t3);"></span>
+        </div>
+        <div id="quickadd-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:14px;background:var(--surface);"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;">
+      <button class="btn btn-ghost" style="padding:12px 20px;" onclick="closeAllModals()">닫기</button>
+      <button class="btn btn-primary" style="padding:12px 24px;" onclick="confirmQuickAdd()">선택 항목 등록</button>
+    </div>
+  </div>
+</div>
+
 <!-- 미완료 업무 정리 -->
 <div class="modal-overlay" id="summary-modal-overlay" style="display:none;" onclick="closeAllModals(event)">
   <div class="modal-box" style="width:620px;">
@@ -1146,11 +1193,17 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.21.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.22.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.22.0", date: "2026-08-26", title: "빠른 등록 (메일 제목 붙여넣기)", items: [
+    "메일 제목이나 목록을 그대로 붙여넣고, 원하는 줄만 체크해서 한 번에 등록할 수 있어요 (AI·API 키 불필요)",
+    "RE:, FW:, 답장: 같은 접두어는 자동으로 지워집니다",
+    "줄 안의 날짜(8/14, 8월 20일, 2026-09-01)를 마감일로 자동 인식해요 — 등록 전에 고칠 수 있어요",
+    "대시보드 '빠른 도구' 또는 전체 태스크 화면의 '⚡ 빠른 등록' 버튼에서 열 수 있어요",
+  ]},
   { version: "2.21.0", date: "2026-08-26", title: "마감 시간 지정", items: [
     "마감일에 시간까지 정할 수 있어요 — 예: 8월 14일 18시까지",
     "등록 줄의 시계 입력, 또는 상세 화면의 ⏰ 칸에서 지정하고 ✕로 해제할 수 있어요 (시간은 선택 사항)",
@@ -3529,6 +3582,112 @@ function renderWikiList() {
     const plain=item.content.replace(/!\[.*?\]\(.*?\)/g,'[이미지]').replace(/[#*`~>|_-]/g,' ').substring(0,120);
     return `<div class="wiki-card" onclick="openWikiModal(${item.id})"><span class="wiki-tag">${catMap[item.category]||'기타'}</span><div class="wiki-title">${escapeHtml(item.title)}</div><div class="wiki-content">${escapeHtml(plain)}...</div><div style="margin-top:20px;font-size:12px;font-weight:600;color:var(--t3);">업데이트: ${item.updatedAt.split(' ')[0]}</div></div>`;
   }).join('');
+}
+
+// ════════ 빠른 등록 (메일 제목 붙여넣기 → 줄 단위 태스크) ════════
+let quickAddItems = [];   // [{ title, date, selected }]
+
+// RE:, FW:, FWD:, 답장:, 전달: 접두어 제거 (연속된 것도 모두)
+function stripMailPrefix(s) {
+  let out = s.trim();
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/^\s*(re|fw|fwd|답장|전달|회신)\s*[:：]\s*/i, '');
+    out = out.replace(/^\s*\[\s*(re|fw|fwd)\s*\]\s*/i, '');
+  } while (out !== prev);
+  return out.trim();
+}
+
+// 연도 추정: 올해 기준, 6개월 이상 지난 날짜면 내년으로 간주
+function inferYearDate(mo, d) {
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  const y = TODAY.getFullYear();
+  let dt = new Date(y, mo - 1, d);
+  if (dt.getMonth() !== mo - 1) return '';               // 2/30 같은 존재하지 않는 날짜
+  if (dt.getTime() < TODAY.getTime() - 180 * 86400000) dt = new Date(y + 1, mo - 1, d);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+
+// 문장 속 날짜 인식 → 'YYYY-MM-DD' (없으면 '')
+function detectDateInText(s) {
+  let m = s.match(/(20\d{2})\s*[.\-\/]\s*(\d{1,2})\s*[.\-\/]\s*(\d{1,2})/);
+  if (m) {
+    const [y, mo, d] = [+m[1], +m[2], +m[3]];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+    const dt = new Date(y, mo - 1, d);
+    if (dt.getMonth() !== mo - 1) return '';   // 2/30 같은 존재하지 않는 날짜
+    return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  m = s.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (m) return inferYearDate(+m[1], +m[2]);
+  m = s.match(/(?:^|[^\d.\/])(\d{1,2})\s*[.\/]\s*(\d{1,2})(?![\d.\/])/);
+  if (m) return inferYearDate(+m[1], +m[2]);
+  return '';
+}
+
+function parseQuickAdd() {
+  const raw = document.getElementById('quickadd-input').value;
+  quickAddItems = raw.split('\n')
+    .map(l => stripMailPrefix(l))
+    .filter(l => l.length > 0)
+    .map(l => ({ title: l, date: detectDateInText(l), selected: true }));
+  renderQuickAddList();
+}
+
+function renderQuickAddList() {
+  const wrap = document.getElementById('quickadd-listwrap');
+  const empty = document.getElementById('quickadd-empty');
+  if (!quickAddItems.length) {
+    wrap.style.display = 'none'; empty.style.display = 'block';
+    return;
+  }
+  wrap.style.display = 'block'; empty.style.display = 'none';
+  document.getElementById('quickadd-list').innerHTML = quickAddItems.map((it, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);">
+      <input type="checkbox" ${it.selected ? 'checked' : ''} onchange="quickAddItems[${i}].selected=this.checked;updateQuickAddCount()" style="transform:scale(1.25);cursor:pointer;accent-color:var(--acc);flex-shrink:0;"/>
+      <input type="text" value="${escapeHtml(it.title)}" oninput="quickAddItems[${i}].title=this.value" class="custom-input" style="flex:1;min-width:0;font-size:13px;padding:8px 10px;border:1px solid var(--border);background:var(--bg);"/>
+      <input type="date" value="${it.date}" onchange="quickAddItems[${i}].date=this.value" title="마감일 (자동 인식됨)" style="flex-shrink:0;font-size:12px;padding:7px 8px;border:1px solid ${it.date ? 'var(--acc)' : 'var(--border)'};border-radius:8px;background:var(--bg);color:var(--t2);font-family:inherit;"/>
+    </div>`).join('');
+  updateQuickAddCount();
+}
+
+function updateQuickAddCount() {
+  const n = quickAddItems.filter(i => i.selected).length;
+  document.getElementById('quickadd-count').textContent = `${quickAddItems.length}줄 중 ${n}건 선택됨`;
+}
+
+function selectAllQuickAdd(val) {
+  quickAddItems.forEach(i => i.selected = val);
+  renderQuickAddList();
+}
+
+function openQuickAdd() {
+  closeAllModals();
+  document.getElementById('quickadd-input').value = '';
+  quickAddItems = [];
+  renderQuickAddList();
+  const m = document.getElementById('quickadd-modal-overlay');
+  m.style.display = 'flex';
+  setTimeout(() => { m.classList.add('open'); document.getElementById('quickadd-input').focus(); }, 10);
+}
+
+function confirmQuickAdd() {
+  const picked = quickAddItems.filter(i => i.selected && i.title.trim());
+  if (!picked.length) return showAlert('등록할 항목을 선택해주세요.');
+  const time = getCurrentDateTime();
+  picked.forEach(it => {
+    const date = it.date || '';
+    tasks.push({
+      id: nextId++, title: it.title.trim(), tags: [], points: 1, retro: '',
+      rawDate: date, dueTime: '', req: '', cat: 'work', st: 'todo',
+      dlv: dlvFromDate(date), dl: formatDl(date, ''), urg: urgFromDlv(dlvFromDate(date)),
+      memo: '', history: [{ text: '⚡ 빠른 등록(붙여넣기)으로 생성됨', time }],
+      subtasks: [], ei: null, repeat: null, stChangedAt: todayISO()
+    });
+  });
+  saveAll(); renderCurrentView(); renderDashboard(); closeAllModals();
+  showToast(`⚡ ${picked.length}건을 등록했어요!`, 'grn');
 }
 
 // ════════ 미완료 업무 정리 (보고용 목록 생성) ════════
