@@ -5,6 +5,13 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.23.0 (2026-09-01)
+    - UX: 붙여넣기 단축 경로 — 앱 아무 곳에서 Ctrl+V 시 빠른 등록이 내용 채워진 채 열림(setupQuickAddPaste)
+      (입력칸에 붙여넣거나 모달이 열려 있을 땐 개입하지 않음)
+    - UX: 등록 줄(#task-title)에 여러 줄 붙여넣기 → 자동으로 빠른 등록으로 전환, 한 줄이면 기존 동작 유지
+    - 기능: stripDateTag() — 제목 앞뒤의 [~9.4(금)까지]·【9.4】·(~9/4) 등 날짜 태그를 떼고 마감일로만 반영
+      날짜 없는 [긴급]·[공지]·(주) 등은 보존, 뗀 게 없으면 원본 간격 그대로 유지
+
   v2.22.0 (2026-08-26)
     - 기능: 빠른 등록 — 붙여넣은 텍스트를 줄 단위로 나눠 체크한 것만 일괄 태스크 생성 (AI 호출 없음, 즉시)
     - stripMailPrefix(): RE:/FW:/FWD:/답장:/전달:/회신: 및 [RE] 형태 접두어 반복 제거
@@ -127,7 +134,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.22.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.23.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -1193,11 +1200,17 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.22.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.23.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.23.0", date: "2026-09-01", title: "붙여넣기 한 번으로 등록 · 날짜 태그 자동 정리", items: [
+    "복사한 뒤 앱에서 그냥 Ctrl+V 하면 빠른 등록 창이 내용이 채워진 채로 바로 열려요",
+    "등록 줄에 여러 줄을 붙여넣어도 자동으로 빠른 등록 목록으로 바뀌어요 (한 줄이면 지금처럼 바로 등록)",
+    "제목 앞뒤의 [~9.4(금)까지] 같은 날짜 태그를 떼어내고 마감일로 넣어줘요 — 제목이 깔끔해져요",
+    "[긴급], [공지] 처럼 날짜가 없는 태그는 그대로 유지됩니다",
+  ]},
   { version: "2.22.0", date: "2026-08-26", title: "빠른 등록 (메일 제목 붙여넣기)", items: [
     "메일 제목이나 목록을 그대로 붙여넣고, 원하는 줄만 체크해서 한 번에 등록할 수 있어요 (AI·API 키 불필요)",
     "RE:, FW:, 답장: 같은 접두어는 자동으로 지워집니다",
@@ -3626,12 +3639,46 @@ function detectDateInText(s) {
   return '';
 }
 
+// 제목 앞뒤에 붙은 날짜 태그를 제거 — [~9.4(금)까지], 【9.4】, (~9/4) 등
+// 날짜가 들어있는 묶음만 떼어내고 [긴급] 같은 일반 태그는 그대로 둔다.
+function stripDateTag(s) {
+  let out = String(s).trim();
+  const lead  = /^\s*(?:\[([^\]]*)\]|【([^】]*)】|\(([^)]*)\))\s*/;
+  const trail = /\s*(?:\[([^\]]*)\]|【([^】]*)】|\(([^)]*)\))\s*$/;
+  const kept = [];
+  let stripped = false;
+  // 앞쪽 묶음들
+  for (;;) {
+    const m = out.match(lead);
+    if (!m) break;
+    const inner = m[1] ?? m[2] ?? m[3] ?? '';
+    if (detectDateInText(inner)) stripped = true;
+    else kept.push(m[0].trim());                           // 날짜 없는 태그는 보존
+    out = out.slice(m[0].length);
+  }
+  // 뒤쪽 묶음들
+  for (;;) {
+    const m = out.match(trail);
+    if (!m) break;
+    const inner = m[1] ?? m[2] ?? m[3] ?? '';
+    if (!detectDateInText(inner)) break;                   // 날짜 없는 태그를 만나면 중단
+    out = out.slice(0, out.length - m[0].length);
+    stripped = true;
+  }
+  if (!stripped) return String(s).trim();                  // 뗀 게 없으면 원본 그대로 (간격 보존)
+  const result = (kept.join(' ') + ' ' + out).trim();
+  return result || String(s).trim();                       // 전부 지워지면 원본 유지
+}
+
 function parseQuickAdd() {
   const raw = document.getElementById('quickadd-input').value;
   quickAddItems = raw.split('\n')
     .map(l => stripMailPrefix(l))
     .filter(l => l.length > 0)
-    .map(l => ({ title: l, date: detectDateInText(l), selected: true }));
+    .map(l => {
+      const date = detectDateInText(l);
+      return { title: date ? stripDateTag(l) : l, date, selected: true };
+    });
   renderQuickAddList();
 }
 
@@ -3662,14 +3709,43 @@ function selectAllQuickAdd(val) {
   renderQuickAddList();
 }
 
-function openQuickAdd() {
+function openQuickAdd(prefill) {
   closeAllModals();
-  document.getElementById('quickadd-input').value = '';
+  document.getElementById('quickadd-input').value = prefill || '';
   quickAddItems = [];
-  renderQuickAddList();
+  if (prefill) parseQuickAdd(); else renderQuickAddList();
   const m = document.getElementById('quickadd-modal-overlay');
   m.style.display = 'flex';
   setTimeout(() => { m.classList.add('open'); document.getElementById('quickadd-input').focus(); }, 10);
+}
+
+// 붙여넣기 단축 경로 — 복사 → 붙여넣기만으로 바로 목록이 뜨게
+function isEditableTarget(el) {
+  if (!el) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || el.isContentEditable === true;
+}
+function getPastedText(e) {
+  return ((e.clipboardData || window.clipboardData)?.getData('text') || '');
+}
+function setupQuickAddPaste() {
+  // ① 앱 아무 곳에서나 Ctrl+V → 빠른 등록이 내용이 채워진 채로 열림
+  document.addEventListener('paste', e => {
+    if (isEditableTarget(e.target)) return;      // 입력칸에 붙여넣는 건 원래대로
+    if (getOpenModals().length) return;          // 모달이 열려 있으면 방해하지 않음
+    const text = getPastedText(e);
+    if (!text.trim()) return;
+    e.preventDefault();
+    openQuickAdd(text);
+  });
+  // ② 등록 줄에 '여러 줄'을 붙여넣으면 자동으로 빠른 등록으로 전환 (한 줄이면 기존대로)
+  const titleInput = document.getElementById('task-title');
+  if (titleInput) titleInput.addEventListener('paste', e => {
+    const text = getPastedText(e);
+    if (!/\n/.test(text.trim())) return;
+    e.preventDefault();
+    openQuickAdd(text);
+  });
 }
 
 function confirmQuickAdd() {
@@ -3986,6 +4062,7 @@ function applyTheme() {
   applySidebarCollapsed();    // 저장된 사이드바 접힘 상태 복원 (데스크톱)
   loadAll();
   setupModalA11y();          // 모달 Escape 닫기·포커스 트랩·복귀 설정
+  setupQuickAddPaste();      // 붙여넣기만으로 빠른 등록 열기
   recomputeTaskDates();      // 저장된 dlv/dl/urg를 오늘 기준으로 다시 계산 (세션 간 노후화 방지)
   _todayStr = todayISO();
   scheduleMidnightRollover(); // 자정 넘어가면 자동 갱신
