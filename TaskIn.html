@@ -5,6 +5,12 @@
   ───────────────────────────────────────────────────────────
   CHANGELOG (코드 버전 / 데이터 스키마 버전 별도 관리)
 
+  v2.24.0 (2026-09-08)
+    - 오프라인/사내망: Toast UI 에디터 CDN 차단 시 위키가 크래시하던 문제 수정 — initWikiEditor()가 로드 여부를 확인하고
+      실패하면 안내 문구 + 일반 textarea로 자동 대체(wikiFallback), getWikiContent()/setWikiContent()로 읽기·쓰기 일원화
+    - 에디터 스크립트에 defer 적용 — 차단된 CDN이 첫 화면 렌더링을 붙잡지 않음
+    - 폰트(Pretendard)는 원래 시스템 폰트 폴백이 있고, Groq API는 try/catch가 있어 차단 시에도 안전
+
   v2.23.0 (2026-09-01)
     - UX: 붙여넣기 단축 경로 — 앱 아무 곳에서 Ctrl+V 시 빠른 등록이 내용 채워진 채 열림(setupQuickAddPaste)
       (입력칸에 붙여넣거나 모달이 열려 있을 땐 개입하지 않음)
@@ -134,10 +140,11 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TaskIn v2.23.0 - 스마트 워크스페이스</title>
+<title>TaskIn v2.24.0 - 스마트 워크스페이스</title>
 <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
-<script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+<!-- 서식 에디터는 위키를 열 때만 쓰므로 defer — 사내망 등에서 차단돼도 첫 화면 로딩을 붙잡지 않음 -->
+<script defer src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Pretendard',-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Helvetica Neue",sans-serif;}
 :root{
@@ -1200,11 +1207,16 @@ body{background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden;let
 
 <script>
 // ════════ 버전 정보 ════════
-const APP_VERSION  = "2.23.0";  // 코드 버전 (기능 단위)
+const APP_VERSION  = "2.24.0";  // 코드 버전 (기능 단위)
 const DATA_SCHEMA  = "v7";      // 데이터 스키마 버전 (필드 구조 변경 시에만 증가)
 
 // ════════ 패치노트 (인앱 표시용 단일 출처) — 최신 버전을 맨 위에 추가 ════════
 const RELEASE_NOTES = [
+  { version: "2.24.0", date: "2026-09-08", title: "사내망·오프라인 대응", items: [
+    "외부 접속이 막힌 환경(사내망)에서도 지식 보관함을 쓸 수 있어요 — 서식 편집기를 못 불러오면 일반 입력칸으로 자동 전환됩니다",
+    "예전에는 이 경우 지식 보관함 작성이 아예 멈췄는데, 이제 안내와 함께 정상 저장돼요",
+    "서식 편집기를 나중에 불러오도록 바꿔서, 외부 접속이 막혀도 첫 화면이 빠르게 뜹니다",
+  ]},
   { version: "2.23.0", date: "2026-09-01", title: "붙여넣기 한 번으로 등록 · 날짜 태그 자동 정리", items: [
     "복사한 뒤 앱에서 그냥 Ctrl+V 하면 빠른 등록 창이 내용이 채워진 채로 바로 열려요",
     "등록 줄에 여러 줄을 붙여넣어도 자동으로 빠른 등록 목록으로 바뀌어요 (한 줄이면 지금처럼 바로 등록)",
@@ -1319,6 +1331,7 @@ let currentTaskId = null;
 let currentWikiId = null;
 let activeFilter = 'all';
 let wikiEditor = null;
+let wikiFallback = false;   // 서식 에디터 로드 실패 시 일반 입력칸으로 동작
 let currentView = 'list';
 
 // 아이젠하워 상수
@@ -3148,8 +3161,7 @@ function saveSelectedKai() {
 
 // ════════ 두레이 마크다운 복사 ════════
 function copyWikiMarkdown() {
-  if (!wikiEditor) return showAlert('에디터가 초기화되지 않았습니다.');
-  const md = wikiEditor.getMarkdown();
+  const md = getWikiContent();
   if (!md.trim()) return showAlert('복사할 내용이 없습니다.');
   navigator.clipboard.writeText(md).then(()=>{
     const btn = document.querySelector('[onclick="copyWikiMarkdown()"]');
@@ -3554,12 +3566,38 @@ async function handleAIParse() {
 }
 
 // ════════ 지식 보관함 ════════
+// 서식 에디터(Toast UI)는 외부 CDN에서 불러온다. 사내망 등에서 차단되면
+// 위키가 통째로 막히지 않도록 일반 입력칸으로 자동 대체한다.
 function initWikiEditor() {
-  if (!wikiEditor) {
-    wikiEditor = new toastui.Editor({
-      el: document.querySelector('#wiki-editor'), height:'340px', initialEditType:'wysiwyg', previewStyle:'vertical', hideModeSwitch:true,
-      toolbarItems:[['heading','bold','italic','strike'],['hr','quote'],['ul','ol','task','indent','outdent'],['table','image','link']]
-    });
+  if (wikiEditor || wikiFallback) return;
+  const host = document.querySelector('#wiki-editor');
+  if (!host) return;
+  if (typeof toastui !== 'undefined' && toastui && toastui.Editor) {
+    try {
+      wikiEditor = new toastui.Editor({
+        el: host, height:'340px', initialEditType:'wysiwyg', previewStyle:'vertical', hideModeSwitch:true,
+        toolbarItems:[['heading','bold','italic','strike'],['hr','quote'],['ul','ol','task','indent','outdent'],['table','image','link']]
+      });
+      return;
+    } catch (e) { /* 아래 대체 입력칸으로 진행 */ }
+  }
+  wikiFallback = true;
+  host.innerHTML =
+    '<div style="font-size:12px;font-weight:600;color:var(--amb);background:var(--amb-bg);border-radius:10px;padding:10px 14px;margin-bottom:10px;line-height:1.6;">' +
+    '⚠️ 서식 편집기를 불러오지 못해 <b>일반 입력칸</b>으로 열었어요. (사내망 등 외부 접속 차단 시) 내용 작성·저장은 그대로 됩니다.</div>' +
+    '<textarea id="wiki-fallback-input" class="custom-input" style="width:100%;height:300px;line-height:1.7;font-size:14px;resize:vertical;" placeholder="내용을 입력하세요."></textarea>';
+}
+// 에디터/대체 입력칸 어느 쪽이든 동일하게 내용 읽고 쓰기
+function getWikiContent() {
+  if (wikiFallback) return document.getElementById('wiki-fallback-input')?.value || '';
+  return wikiEditor ? wikiEditor.getMarkdown() : '';
+}
+function setWikiContent(md) {
+  if (wikiFallback) {
+    const el = document.getElementById('wiki-fallback-input');
+    if (el) el.value = md || '';
+  } else if (wikiEditor) {
+    wikiEditor.setMarkdown(md || '');
   }
 }
 function openWikiModal(id=null) {
@@ -3570,16 +3608,16 @@ function openWikiModal(id=null) {
     if (id) {
       const item=wikiItems.find(x=>x.id===id);
       document.getElementById('wiki-title').value=item.title; document.getElementById('wiki-cat').value=item.category||'general';
-      wikiEditor.setMarkdown(item.content||''); document.getElementById('wiki-del-btn').style.display='block';
+      setWikiContent(item.content||''); document.getElementById('wiki-del-btn').style.display='block';
     } else {
-      document.getElementById('wiki-title').value=''; wikiEditor.setMarkdown(''); document.getElementById('wiki-del-btn').style.display='none';
+      document.getElementById('wiki-title').value=''; setWikiContent(''); document.getElementById('wiki-del-btn').style.display='none';
     }
     m.classList.add('open');
   },10);
 }
 function saveWiki() {
   const title=document.getElementById('wiki-title').value.trim(); const cat=document.getElementById('wiki-cat').value;
-  const content=wikiEditor.getMarkdown();
+  const content=getWikiContent();
   if (!title) return showAlert('제목을 입력하세요.');
   if (content.length>2500000) return showAlert('이미지 용량이 너무 큽니다.');
   if (currentWikiId) { const idx=wikiItems.findIndex(x=>x.id===currentWikiId); wikiItems[idx]={...wikiItems[idx],title,category:cat,content,updatedAt:new Date().toLocaleString()}; }
